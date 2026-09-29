@@ -162,13 +162,20 @@ async def read_original(p: Principal, artifact_id: uuid.UUID) -> tuple[dict, byt
 
 
 async def _read_bytes(p: Principal, artifact: dict) -> bytes:
+    return await read_bytes(p.household_id, artifact, actor=p)
+
+
+async def read_bytes(household_id: uuid.UUID, artifact: dict, *, actor: Principal | None = None) -> bytes:
+    """Decrypt an artifact's original and check it against its hash. Every
+    read is audited, by the member who asked or by the system (extraction)."""
     async with pool().acquire() as conn:
-        key = await _household_key(conn, p.household_id)
+        key = await _household_key(conn, household_id)
         blob = await conn.fetchrow("SELECT * FROM blobs WHERE id = $1", artifact["blob_id"])
-        data = crypto.open_sealed(key, await blobstore.store().get(blob["storage_key"]), _aad(p.household_id, blob["sha256"]))
+        data = crypto.open_sealed(key, await blobstore.store().get(blob["storage_key"]), _aad(household_id, blob["sha256"]))
         if sha256(data) != blob["sha256"]:
             raise RuntimeError(f"blob {blob['id']} failed its integrity check")
-        await audit.record(p.household_id, "artifact.original_read", actor_member_id=p.member_id,
+        await audit.record(household_id, "artifact.original_read", actor_kind="member" if actor else "system",
+                           actor_member_id=actor.member_id if actor else None,
                            target_type="artifact", target_id=artifact["id"], conn=conn)
     return data
 
@@ -241,8 +248,10 @@ async def accept_quarantined(p: Principal, artifact_id: uuid.UUID, member_id: uu
             p.household_id, artifact_id, member_id, visibility)
         if row is None:
             raise NotFound("quarantined artifact")
-        await conn.execute("UPDATE input_artifacts SET status = 'accepted', accepted_at = NOW(), submitted_by = $2, "
-                           "visibility = $3 WHERE parent_id = $1", artifact_id, member_id, visibility)
+        children = await conn.fetch("UPDATE input_artifacts SET status = 'accepted', accepted_at = NOW(), submitted_by = $2, "
+                                    "visibility = $3 WHERE parent_id = $1 RETURNING id", artifact_id, member_id, visibility)
+        from familyos.extraction import service as extraction  # extraction imports this module
+        await extraction.enqueue(conn, p.household_id, [artifact_id] + [c["id"] for c in children], member_id=member_id)
         await audit.record(p.household_id, "artifact.quarantine_accepted", actor_member_id=p.member_id,
                            target_type="artifact", target_id=artifact_id,
                            detail={"owner_member_id": str(member_id), "visibility": visibility}, conn=conn)

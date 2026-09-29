@@ -4,7 +4,7 @@ A household agent that turns school notices, bills and forms into things
 that get done, without losing track of where each fact came from or who is
 allowed to see it.
 
-This is milestone 1: the intake and trust layer.
+Milestone 1 is the intake and trust layer:
 
 - Households with guardians, adults and children, and private/shared visibility
 - One intake path for every channel: upload (share sheet) and a forwarding email address
@@ -13,6 +13,14 @@ This is milestone 1: the intake and trust layer.
 - Append-only audit trail
 - Parental consent records, and erasure of a child's data or the whole household
 
+Milestone 2 is extraction: every accepted notice is read (PDF text, OCR for
+photos and scans, email), and the facts in it (dates, deadlines, amounts,
+forms, changes to earlier notices) become claims that point back to the
+exact place in the original. Actionable claims become proposed tasks and
+calendar entries for a member to accept or dismiss. See
+[docs/extraction.md](docs/extraction.md), including how to score it against
+the test set.
+
 See [docs/architecture.md](docs/architecture.md) for how it fits together and
 [docs/provenance.md](docs/provenance.md) for code taken from Orbit.
 
@@ -20,7 +28,8 @@ See [docs/architecture.md](docs/architecture.md) for how it fits together and
 
 ```sh
 docker compose up -d                 # Postgres + MinIO
-cp .env.example .env                 # then set FAMILYOS_MASTER_KEY
+cp .env.example .env                 # then set FAMILYOS_MASTER_KEY (and FAMILYOS_ANTHROPIC_API_KEY)
+sudo apt-get install tesseract-ocr   # OCR; brew install tesseract on macOS
 pip install -e ".[dev]"
 uvicorn familyos.main:app --reload   # applies migrations on start
 ```
@@ -70,3 +79,5 @@ ruff check .
 | POST | `/v1/members/{id}/erase`, `/v1/household/erase` | guardians |
 | GET | `/v1/erasures/{id}` | members |
 | GET | `/v1/audit` | guardians |
+| GET | `/v1/artifacts/{id}/extraction`; POST `/v1/artifacts/{id}/extract` | members, visibility applies |
+| GET | `/v1/obligations`; POST `/v1/obligations/{id}/decision` | members, visibility applies |

@@ -9,10 +9,12 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Reque
 
 from familyos import artifacts, audit, consent, erasure, identity
 from familyos.api.deps import current_member
+from familyos.extraction import service as extraction
 from familyos.identity import Principal
 from familyos.intake import gateway
 from familyos.models import (
     Artifact,
+    ArtifactExtraction,
     AuditEvent,
     Consent,
     ConsentIn,
@@ -25,6 +27,8 @@ from familyos.models import (
     IntakeResult,
     Member,
     MemberIn,
+    Obligation,
+    ObligationDecisionIn,
     QuarantineAcceptIn,
     Visibility,
     VisibilityIn,
@@ -46,6 +50,15 @@ def _member(row: dict) -> Member:
 
 def _artifact(row: dict) -> Artifact:
     return Artifact(**{k: row[k] for k in Artifact.model_fields if k in row})
+
+
+def _extraction(body: dict) -> ArtifactExtraction:
+    x = body["extraction"]
+    if x is not None:
+        x = {**x, "claims": [{**c, "location": {k: c[k] for k in ("page", "span_start", "span_end", "boxes", "match")}}
+                             for c in x["claims"]]}
+        x["claims"] = [{**c, "amount": float(c["amount"]) if c["amount"] is not None else None} for c in x["claims"]]
+    return ArtifactExtraction(**{**body, "extraction": x})
 
 
 # ----------------------------------------------------------------------------
@@ -144,6 +157,33 @@ async def set_subjects(artifact_id: uuid.UUID, member_ids: list[uuid.UUID], p: P
 @router.delete("/artifacts/{artifact_id}", status_code=204, tags=["artifacts"])
 async def delete_artifact(artifact_id: uuid.UUID, p: Principal = Depends(current_member)):
     await artifacts.delete_by_member(p, artifact_id)
+
+
+# ----------------------------------------------------------------------------
+# extraction and obligations
+# ----------------------------------------------------------------------------
+
+@router.get("/artifacts/{artifact_id}/extraction", response_model=ArtifactExtraction, tags=["extraction"])
+async def get_extraction(artifact_id: uuid.UUID, p: Principal = Depends(current_member)):
+    """The claims read from an artifact, each with where it came from."""
+    return _extraction(await extraction.get_for_artifact(p, artifact_id))
+
+
+@router.post("/artifacts/{artifact_id}/extract", status_code=202, tags=["extraction"])
+async def rerun_extraction(artifact_id: uuid.UUID, p: Principal = Depends(current_member)):
+    """Read the artifact again, e.g. after the extractor improved."""
+    return await extraction.rerun(p, artifact_id)
+
+
+@router.get("/obligations", response_model=list[Obligation], tags=["extraction"])
+async def list_obligations(status: str | None = "proposed", limit: int = 100, p: Principal = Depends(current_member)):
+    """Obligations from artifacts the member can see. `status=` (empty) lists all."""
+    return [Obligation(**r) for r in await extraction.list_obligations(p, status or None, limit)]
+
+
+@router.post("/obligations/{obligation_id}/decision", response_model=Obligation, tags=["extraction"])
+async def decide_obligation(obligation_id: uuid.UUID, body: ObligationDecisionIn, p: Principal = Depends(current_member)):
+    return Obligation(**await extraction.decide(p, obligation_id, body.status))
 
 
 # ----------------------------------------------------------------------------

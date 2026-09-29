@@ -13,6 +13,7 @@ from familyos import db, erasure, jobs
 from familyos.api.routes import router
 from familyos.artifacts import HouseholdUnavailable
 from familyos.consent import ConsentRequired
+from familyos.extraction import service as extraction
 from familyos.identity import Invalid, NotAllowed, NotFound
 from familyos.intake.gateway import Rejected
 from familyos.settings import settings
@@ -22,6 +23,7 @@ logger = logging.getLogger("familyos")
 
 def register_job_handlers() -> None:
     erasure.register()
+    extraction.register()
 
 
 @contextlib.asynccontextmanager

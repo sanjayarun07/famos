@@ -139,3 +139,89 @@ class AuditEvent(BaseModel):
     target_id: uuid.UUID | None
     detail: dict
     at: datetime
+
+
+# ----------------------------------------------------------------------------
+# extraction
+# ----------------------------------------------------------------------------
+
+class SourceLocation(BaseModel):
+    """Where a claim's quote sits in the original: the page, the character
+    span in that page's extracted text, and one box per line (PDF points
+    from the top left, or image pixels)."""
+    page: int | None
+    span_start: int | None
+    span_end: int | None
+    boxes: list[list[float]] | None
+    match: str | None = Field(description="exact, normalized or fuzzy; null when the quote was not found")
+
+
+class ClaimOut(BaseModel):
+    id: uuid.UUID
+    kind: str
+    title: str
+    date: date | None
+    end_date: date | None
+    date_text: str | None
+    time_text: str | None
+    place: str | None
+    amount: float | None
+    currency: str | None
+    amount_text: str | None
+    applies_to: str | None
+    subject_name: str | None
+    requires: list[str]
+    optional: bool
+    uncertain: bool
+    amends: str | None
+    change: str | None
+    quote: str
+    location: SourceLocation
+    confidence: float
+
+
+class ExtractionOut(BaseModel):
+    id: uuid.UUID
+    extractor: str
+    model: str | None
+    prompt_version: str
+    parser_version: str
+    reference_date: date | None
+    actionable: bool
+    non_actionable_reason: str | None
+    page_count: int
+    ocr_pages: int
+    notes: list[str]
+    created_at: datetime
+    claims: list[ClaimOut]
+
+
+class ArtifactExtraction(BaseModel):
+    """`extraction` is null until the job has finished; `job_status` says where it is."""
+    artifact_id: uuid.UUID
+    extraction: ExtractionOut | None
+    job_id: uuid.UUID | None
+    job_status: str | None
+    job_error: str | None
+
+
+class Obligation(BaseModel):
+    id: uuid.UUID
+    artifact_id: uuid.UUID
+    claim_id: uuid.UUID
+    subject_member_id: uuid.UUID | None
+    kind: Literal["task", "calendar"]
+    action: str
+    title: str
+    due_date: date | None
+    end_date: date | None
+    due_time: str | None
+    optional: bool
+    status: Literal["proposed", "accepted", "dismissed"]
+    decided_by: uuid.UUID | None
+    decided_at: datetime | None
+    created_at: datetime
+
+
+class ObligationDecisionIn(BaseModel):
+    status: Literal["accepted", "dismissed"]

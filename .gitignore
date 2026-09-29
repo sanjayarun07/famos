@@ -6,3 +6,4 @@ __pycache__/
 .blobs/
 .pytest_cache/
 .ruff_cache/
+.extraction-cache/

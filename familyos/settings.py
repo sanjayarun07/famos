@@ -42,5 +42,13 @@ class Settings(BaseSettings):
     job_max_attempts: int = 5
     job_attach_seconds: float = 20.0
 
+    # Extraction (familyos/extraction). "auto" uses Claude when an API key
+    # is set and the offline rule-based extractor otherwise.
+    extraction_enabled: bool = True
+    extractor: str = "auto"                 # auto | claude | rules
+    anthropic_api_key: str = Field(default="", repr=False)
+    extraction_model: str = "claude-opus-5-5"
+    extraction_effort: str = "medium"
+
 
 settings = Settings()
