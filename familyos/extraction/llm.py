@@ -1,4 +1,9 @@
-"""The model-based extractor: Claude reads the notice and returns typed claims.
+"""The model-based extractors: a model reads the notice and returns typed claims.
+
+Two providers share one prompt and one output schema: Anthropic (Claude)
+and OpenAI. The model is named LiteLLM-style, `provider/model`, e.g.
+`openai/gpt-5.6-sol` or `anthropic/claude-opus-5-5`; a bare `claude-*`
+name means Anthropic.
 
 The model sees the parsed page text, not the file, so every quote it
 returns can be looked up in the same text we store (grounding). The answer
@@ -17,7 +22,6 @@ from familyos.extraction.parse import ParsedDocument
 
 logger = logging.getLogger(__name__)
 
-NAME = "claude"
 PROMPT_VERSION = "extract-v1"
 # Refused requests are retried on a fallback model chosen by the API.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -115,15 +119,42 @@ def build_request(doc: ParsedDocument, reference_date: dt.date | None, *, model:
     }
 
 
-class ClaudeExtractor:
-    name = NAME
+def split_model(model: str) -> tuple[str, str]:
+    """("openai", "gpt-5.6-sol") from "openai/gpt-5.6-sol"; bare names by their family."""
+    provider, sep, name = model.partition("/")
+    if sep:
+        return provider.lower(), name
+    return ("anthropic" if model.startswith("claude") else "openai"), model
+
+
+class ModelExtractor:
+    """What the pipeline, the job and the scorer need from a model provider:
+    one cacheable call returning {"answer", "model", "usage"}."""
+    name: str
     prompt_version = PROMPT_VERSION
 
-    def __init__(self, *, api_key: str | None, model: str, effort: str = "medium", client=None):
+    def __init__(self, *, api_key: str | None, model: str, effort: str | None = "medium", client=None):
         self.model = model
         self.effort = effort
         self._client = client
         self._api_key = api_key
+
+    async def call(self, doc: ParsedDocument, reference_date: dt.date | None) -> dict:
+        raise NotImplementedError
+
+    @staticmethod
+    def claims_from(answer: dict) -> list[Claim]:
+        claims = []
+        for raw in answer.get("claims") or []:
+            try:
+                claims.append(Claim.model_validate({k: v for k, v in raw.items() if v is not None or k in ("date",)}))
+            except ValueError:
+                logger.warning("dropped a claim that did not validate: kind=%s", raw.get("kind"))
+        return claims
+
+
+class ClaudeExtractor(ModelExtractor):
+    name = "claude"
 
     def _get_client(self):
         if self._client is None:
@@ -134,7 +165,7 @@ class ClaudeExtractor:
     async def call(self, doc: ParsedDocument, reference_date: dt.date | None) -> dict:
         """One model call; returns the parsed JSON answer and usage. This is
         the part a job caches, so a resumed job never pays for it twice."""
-        request = build_request(doc, reference_date, model=self.model, effort=self.effort)
+        request = build_request(doc, reference_date, model=split_model(self.model)[1], effort=self.effort or "medium")
         async with self._get_client().beta.messages.stream(**request, betas=[FALLBACK_BETA], fallbacks="default") as stream:
             message = await stream.get_final_message()
         if message.stop_reason == "refusal":
@@ -148,12 +179,37 @@ class ClaudeExtractor:
         return {"answer": json.loads(text), "model": message.model,
                 "usage": {"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens}}
 
-    @staticmethod
-    def claims_from(answer: dict) -> list[Claim]:
-        claims = []
-        for raw in answer.get("claims") or []:
-            try:
-                claims.append(Claim.model_validate({k: v for k, v in raw.items() if v is not None or k in ("date",)}))
-            except ValueError:
-                logger.warning("dropped a claim that did not validate: kind=%s", raw.get("kind"))
-        return claims
+
+class OpenAIExtractor(ModelExtractor):
+    """OpenAI chat completions with a strict JSON schema response format."""
+    name = "openai"
+
+    def _get_client(self):
+        if self._client is None:
+            import openai
+            self._client = openai.AsyncOpenAI(api_key=self._api_key, max_retries=3)
+        return self._client
+
+    async def call(self, doc: ParsedDocument, reference_date: dt.date | None) -> dict:
+        request = build_request(doc, reference_date, model=self.model, effort=self.effort or "medium")
+        kwargs = {
+            "model": split_model(self.model)[1],
+            "messages": [{"role": "system", "content": request["system"]}, *request["messages"]],
+            "response_format": {"type": "json_schema",
+                                "json_schema": {"name": "notice_claims", "schema": OUTPUT_SCHEMA, "strict": True}},
+            "max_completion_tokens": request["max_tokens"],
+        }
+        if self.effort:
+            kwargs["reasoning_effort"] = self.effort
+        response = await self._get_client().chat.completions.create(**kwargs)
+        choice = response.choices[0]
+        if getattr(choice.message, "refusal", None):
+            raise RuntimeError("the model declined to read this notice")
+        if choice.finish_reason == "length":
+            raise RuntimeError("the model's answer was cut off")
+        if not choice.message.content:
+            raise RuntimeError("the model returned no answer")
+        usage = response.usage
+        return {"answer": json.loads(choice.message.content), "model": f"openai/{response.model}",
+                "usage": {"input_tokens": getattr(usage, "prompt_tokens", None),
+                          "output_tokens": getattr(usage, "completion_tokens", None)}}

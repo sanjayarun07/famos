@@ -12,7 +12,7 @@ import datetime as dt
 
 from familyos.extraction import ground
 from familyos.extraction.claims import Claim, Extraction, ExtractorInfo
-from familyos.extraction.llm import ClaudeExtractor
+from familyos.extraction.llm import ClaudeExtractor, ModelExtractor, OpenAIExtractor, split_model
 from familyos.extraction.parse import ParsedDocument
 from familyos.extraction.rules import RulesExtractor
 from familyos.settings import settings
@@ -22,15 +22,26 @@ TASK_KINDS = {"deadline", "form", "payment"}
 
 
 def make_extractor(name: str | None = None):
+    """`rules`, `model` (the provider of FAMILYOS_EXTRACTION_MODEL), or `auto`:
+    the model when its provider's API key is set, the rules otherwise.
+    `claude` and `openai` pick that provider with its default model."""
     name = name or settings.extractor
+    model = settings.extraction_model
+    if name in ("claude", "anthropic") and split_model(model)[0] != "anthropic":
+        model = "anthropic/claude-opus-5-5"
+    elif name == "openai" and split_model(model)[0] != "openai":
+        model = "openai/gpt-5.6-sol"
+    provider = split_model(model)[0]
+    keys = {"anthropic": settings.anthropic_api_key, "openai": settings.openai_api_key}
     if name == "auto":
-        name = "claude" if settings.anthropic_api_key else "rules"
+        name = "model" if keys.get(provider) else "rules"
     if name == "rules":
         return RulesExtractor()
-    if name == "claude":
-        return ClaudeExtractor(api_key=settings.anthropic_api_key or None, model=settings.extraction_model,
-                               effort=settings.extraction_effort)
-    raise ValueError(f"unknown extractor {name!r}")
+    if provider == "anthropic":
+        return ClaudeExtractor(api_key=keys["anthropic"] or None, model=model, effort=settings.extraction_effort)
+    if provider == "openai":
+        return OpenAIExtractor(api_key=keys["openai"] or None, model=model, effort=settings.extraction_effort)
+    raise ValueError(f"unknown model provider {provider!r} in {model!r}")
 
 
 def info(extractor, doc: ParsedDocument, model: str | None = None) -> ExtractorInfo:
@@ -61,7 +72,7 @@ def finish(doc: ParsedDocument, claims: list[Claim], extractor_info: ExtractorIn
 
 async def extract(doc: ParsedDocument, reference_date: dt.date | None, extractor=None) -> Extraction:
     extractor = extractor or make_extractor()
-    if isinstance(extractor, ClaudeExtractor):
+    if isinstance(extractor, ModelExtractor):
         if doc.char_count == 0:
             return finish(doc, [], info(extractor, doc), reference_date)
         response = await extractor.call(doc, reference_date)
@@ -70,8 +81,8 @@ async def extract(doc: ParsedDocument, reference_date: dt.date | None, extractor
     return finish(doc, claims, info(extractor, doc), reference_date)
 
 
-def from_model_response(doc: ParsedDocument, response: dict, extractor: ClaudeExtractor,
+def from_model_response(doc: ParsedDocument, response: dict, extractor: ModelExtractor,
                         reference_date: dt.date | None) -> Extraction:
     answer = response["answer"]
-    return finish(doc, ClaudeExtractor.claims_from(answer), info(extractor, doc, response.get("model")), reference_date,
+    return finish(doc, ModelExtractor.claims_from(answer), info(extractor, doc, response.get("model")), reference_date,
                   actionable=bool(answer.get("actionable")), reason=answer.get("non_actionable_reason"))

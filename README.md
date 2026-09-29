@@ -28,7 +28,7 @@ See [docs/architecture.md](docs/architecture.md) for how it fits together and
 
 ```sh
 docker compose up -d                 # Postgres + MinIO
-cp .env.example .env                 # then set FAMILYOS_MASTER_KEY (and FAMILYOS_ANTHROPIC_API_KEY)
+cp .env.example .env                 # then set FAMILYOS_MASTER_KEY (and OPENAI_API_KEY)
 sudo apt-get install tesseract-ocr   # OCR; brew install tesseract on macOS
 pip install -e ".[dev]"
 uvicorn familyos.main:app --reload   # applies migrations on start

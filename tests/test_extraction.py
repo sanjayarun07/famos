@@ -14,7 +14,7 @@ from familyos.extraction import evaluate, pipeline
 from familyos.extraction.claims import Claim
 from familyos.extraction.dates import find_dates
 from familyos.extraction.ground import locate
-from familyos.extraction.llm import OUTPUT_SCHEMA, PROMPT_VERSION, ClaudeExtractor, build_request
+from familyos.extraction.llm import OUTPUT_SCHEMA, PROMPT_VERSION, ClaudeExtractor, OpenAIExtractor, build_request
 from familyos.extraction.obligations import propose
 from familyos.extraction.parse import parse
 from familyos.extraction.rules import RulesExtractor
@@ -168,6 +168,51 @@ async def test_claude_answers_are_grounded():
     assert all(c.grounded for c in x.claims)
     assert x.claims[2].amount.value == 150 and x.claims[2].amount.currency == "INR"
     assert client.calls[0]["fallbacks"] == "default"
+
+
+class FakeOpenAI:
+    def __init__(self, answer: dict):
+        self.answer = answer
+        self.calls = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **request):
+        self.calls.append(request)
+        message = SimpleNamespace(content=json.dumps(self.answer), refusal=None)
+        return SimpleNamespace(model=request["model"], choices=[SimpleNamespace(message=message, finish_reason="stop")],
+                               usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=200))
+
+
+async def test_openai_answers_are_grounded_the_same_way():
+    doc = parse(make_pdf(TRIP), "application/pdf")
+    client = FakeOpenAI(model_answer())
+    x = await pipeline.extract(doc, dt.date(Y, 10, 20), OpenAIExtractor(api_key=None, model="openai/gpt-5.6-sol", client=client))
+    request = client.calls[0]
+    assert request["model"] == "gpt-5.6-sol" and request["reasoning_effort"] == "medium"
+    assert request["response_format"]["json_schema"] == {"name": "notice_claims", "schema": OUTPUT_SCHEMA, "strict": True}
+    assert request["messages"][0]["role"] == "system" and f"{Y}-10-20" in request["messages"][0]["content"]
+    assert x.extractor.name == "openai" and x.extractor.model == "openai/gpt-5.6-sol"
+    assert len(x.claims) == 3 and all(c.grounded for c in x.claims)
+
+
+def test_the_extractor_follows_the_configured_model_and_key(monkeypatch):
+    monkeypatch.setattr(settings, "extraction_model", "openai/gpt-5.6-sol")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    assert pipeline.make_extractor("auto").name == "rules"
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    chosen = pipeline.make_extractor("auto")
+    assert chosen.name == "openai" and chosen.model == "openai/gpt-5.6-sol"
+    monkeypatch.setattr(settings, "extraction_model", "anthropic/claude-opus-5-5")
+    assert pipeline.make_extractor("auto").name == "rules"      # no Anthropic key
+    assert pipeline.make_extractor("model").name == "claude"
+
+
+def test_openai_key_is_read_from_its_usual_name(monkeypatch):
+    from familyos.settings import Settings
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    monkeypatch.delenv("FAMILYOS_OPENAI_API_KEY", raising=False)
+    assert Settings().openai_api_key == "sk-from-env"
 
 
 # ----------------------------------------------------------------------------

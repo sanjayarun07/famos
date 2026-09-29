@@ -39,18 +39,22 @@ its box: PDF points from the top left, or image pixels.
 
 ### Extractors
 
-- **claude** (`llm.py`): the model gets the page text, not the file, so
-  every quote it returns can be looked up in the text we store. The answer
-  is constrained to a JSON schema with structured outputs. Default model
-  `claude-opus-5-5` at effort `medium`; refused requests fall back to
-  another model server-side. The prompt is versioned (`PROMPT_VERSION`);
-  change it whenever the prompt or schema changes.
+- **model** (`llm.py`): a model gets the page text, not the file, so every
+  quote it returns can be looked up in the text we store. The answer is
+  constrained to one JSON schema (structured outputs, strict). The model is
+  named `provider/model`, LiteLLM-style: the default is
+  `openai/gpt-5.6-sol` (OpenAI chat completions); `anthropic/claude-opus-5-5`
+  uses Claude, where refused requests fall back to another model
+  server-side. Both run at effort `medium` and share one prompt, versioned
+  as `PROMPT_VERSION`; change it whenever the prompt or schema changes.
 - **rules** (`rules.py`): regular expressions over lines with dates and
   amounts, no network. The baseline the model is scored against, and the
   fallback when no API key is configured.
 
-`FAMILYOS_EXTRACTOR=auto` (the default) uses Claude when
-`FAMILYOS_ANTHROPIC_API_KEY` is set, and the rules otherwise.
+`FAMILYOS_EXTRACTOR=auto` (the default) uses the model named by
+`FAMILYOS_EXTRACTION_MODEL` when its provider's key is set
+(`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, or the same with a `FAMILYOS_`
+prefix), and the rules otherwise.
 
 ### Claims
 
@@ -113,7 +117,7 @@ notice should produce, and the originals.
 
 ```sh
 python -m familyos.extraction.evaluate --extractor rules
-FAMILYOS_ANTHROPIC_API_KEY=... python -m familyos.extraction.evaluate --extractor claude --cache .extraction-cache \
+OPENAI_API_KEY=... python -m familyos.extraction.evaluate --extractor model --cache .extraction-cache \
     --out report.json --markdown report.md
 ```
 

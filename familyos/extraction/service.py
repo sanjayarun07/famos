@@ -24,7 +24,7 @@ from familyos import artifacts, audit, jobs
 from familyos.db import pool
 from familyos.extraction import pipeline
 from familyos.extraction.claims import Extraction
-from familyos.extraction.llm import ClaudeExtractor
+from familyos.extraction.llm import ModelExtractor
 from familyos.extraction.obligations import propose
 from familyos.extraction.parse import parse
 from familyos.identity import Invalid, NotFound, Principal
@@ -75,7 +75,7 @@ async def _handle(job: dict, ctx: jobs.JobContext) -> dict:
     doc = await asyncio.to_thread(parse, data, artifact["media_type"])
     ref = reference_date(artifact)
     extractor = pipeline.make_extractor()
-    if isinstance(extractor, ClaudeExtractor) and doc.char_count:
+    if isinstance(extractor, ModelExtractor) and doc.char_count:
         response = await ctx.call(
             "extract", lambda: extractor.call(doc, ref),
             args={"sha256": artifact["sha256"], "model": extractor.model, "effort": extractor.effort,

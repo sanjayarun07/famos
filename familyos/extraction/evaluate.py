@@ -1,7 +1,7 @@
 """Score an extractor against the labelled test set.
 
     python -m familyos.extraction.evaluate --evalset evalset --extractor rules
-    python -m familyos.extraction.evaluate --evalset evalset --extractor claude --cache .extraction-cache
+    python -m familyos.extraction.evaluate --evalset evalset --extractor model --cache .extraction-cache
 
 Each line of notices.jsonl is one notice with its expected facts. The
 scorer runs the same pipeline intake uses (parse, extract, ground) on each
@@ -37,7 +37,7 @@ from pathlib import Path
 from familyos.extraction import pipeline
 from familyos.extraction.claims import Claim, Extraction
 from familyos.extraction.dates import amounts_in_label, iso_dates
-from familyos.extraction.llm import ClaudeExtractor
+from familyos.extraction.llm import ModelExtractor
 from familyos.extraction.obligations import propose
 from familyos.extraction.parse import parse
 
@@ -295,7 +295,7 @@ async def run(evalset: Path, extractor_name: str, cache: Path | None, ids: set[s
         data = path.read_bytes()
         doc = parse(data, MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream"))
         ref = reference_date(row.get("issued"))
-        if isinstance(extractor, ClaudeExtractor):
+        if isinstance(extractor, ModelExtractor):
             response = None
             key = hashlib.sha256(f"{hashlib.sha256(data).hexdigest()}:{extractor.model}:{extractor.effort}:"
                                  f"{extractor.prompt_version}:{doc.parser_version}:{ref}".encode()).hexdigest()[:24]
@@ -325,7 +325,7 @@ async def run(evalset: Path, extractor_name: str, cache: Path | None, ids: set[s
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--evalset", type=Path, default=Path("evalset"))
-    ap.add_argument("--extractor", default="auto", choices=["auto", "claude", "rules"])
+    ap.add_argument("--extractor", default="auto", choices=["auto", "model", "claude", "openai", "rules"])
     ap.add_argument("--cache", type=Path, default=None, help="directory for cached model answers")
     ap.add_argument("--ids", default=None, help="comma-separated notice ids")
     ap.add_argument("--out", type=Path, default=None, help="write the full JSON report here")
