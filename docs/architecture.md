@@ -92,8 +92,13 @@ filenames, subjects or text.
 - Redis is not used yet. It arrives with rate limiting and caching, and will
   hold nothing that must survive a restart.
 
-## Next milestone
+## Milestone 2: extraction
 
-Claims with source spans (extraction), reconciliation of revised notices, the
-review card, obligations and reminders on `jobs.py`, and the evaluation set of
-real notices, built before the extractor.
+Claims with source spans, proposed obligations and the scorer: see
+[extraction.md](extraction.md).
+
+## Next
+
+Reconciliation of revised notices (an amendment claim updating the
+obligations of the notice it amends), the review card, reminders on
+`jobs.py`, and matching `applies_to` to a child's class.

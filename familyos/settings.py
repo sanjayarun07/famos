@@ -1,7 +1,7 @@
 """Configuration, read from the environment (prefix FAMILYOS_) or a .env file."""
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +41,19 @@ class Settings(BaseSettings):
     job_lease_seconds: float = 60.0
     job_max_attempts: int = 5
     job_attach_seconds: float = 20.0
+
+    # Extraction (familyos/extraction). "auto" uses the model when its
+    # provider's API key is set and the offline rule-based extractor otherwise.
+    # The model is named provider/model, LiteLLM-style.
+    extraction_enabled: bool = True
+    extractor: str = "auto"                 # auto | model | rules (claude, openai pick a provider)
+    extraction_model: str = Field(default="openai/gpt-5.6-sol",
+                                  validation_alias=AliasChoices("FAMILYOS_EXTRACTION_MODEL", "RESEARCH_MODEL"))
+    extraction_effort: str = "medium"
+    anthropic_api_key: str = Field(default="", repr=False,
+                                   validation_alias=AliasChoices("FAMILYOS_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"))
+    openai_api_key: str = Field(default="", repr=False,
+                                validation_alias=AliasChoices("FAMILYOS_OPENAI_API_KEY", "OPENAI_API_KEY"))
 
 
 settings = Settings()

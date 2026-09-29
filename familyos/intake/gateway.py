@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 
 from familyos import artifacts, audit
 from familyos.db import pool
+from familyos.extraction import service as extraction
 from familyos.identity import Principal, household_by_inbound_token, member_by_email
 from familyos.intake import email as email_adapter
 from familyos.intake.sniff import ALLOWED, sniff
@@ -60,12 +61,15 @@ async def receive_upload(p: Principal, data: bytes, *, filename: str | None, dec
         await _rejected(p.household_id, p, "unsupported_type", status=415)
     digest = artifacts.sha256(data)
     async with pool().acquire() as conn, conn.transaction():
-        return await artifacts.create(conn, p.household_id, artifacts.NewArtifact(
+        artifact, duplicate = await artifacts.create(conn, p.household_id, artifacts.NewArtifact(
             data=data, media_type=envelope.media_type, channel="upload", visibility=visibility, status="accepted",
             submitted_by=p.member_id, filename=envelope.filename, note=note,
             # The same member sending the same bytes again gets the same artifact.
             dedup_key=f"upload:{p.member_id}:{digest}",
             subject_member_ids=tuple(subject_member_ids or ())))
+        if not duplicate:
+            await extraction.enqueue(conn, p.household_id, [artifact["id"]], member_id=p.member_id)
+        return artifact, duplicate
 
 
 # ----------------------------------------------------------------------------
@@ -111,14 +115,19 @@ async def receive_email(raw: bytes, recipient: str | None = None) -> tuple[dict,
             actor_kind="inbound")
         if duplicate:
             return parent, True
+        stored = [parent["id"]]
         for attachment in message.attachments:
             media_type = sniff(attachment.data, attachment.media_type)
             if media_type not in ALLOWED or not attachment.data:
                 continue
-            await artifacts.create(conn, household_id, artifacts.NewArtifact(
+            child, _ = await artifacts.create(conn, household_id, artifacts.NewArtifact(
                 data=attachment.data, media_type=media_type, channel="email_attachment", visibility="private",
                 status=status, submitted_by=submitted_by, filename=_clean_filename(attachment.filename),
                 parent_id=parent["id"], quarantine_reason=reason), actor_kind="inbound")
+            stored.append(child["id"])
+        if status == "accepted":
+            # Quarantined mail is not read until a guardian accepts it.
+            await extraction.enqueue(conn, household_id, stored, member_id=submitted_by)
         parent = dict(await conn.fetchrow(artifacts._SELECT + " WHERE a.id = $1", parent["id"]))
     return parent, False
 
