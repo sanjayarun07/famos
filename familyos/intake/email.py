@@ -15,6 +15,8 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from email.utils import getaddresses, parseaddr
 
+from familyos.settings import settings
+
 # An inline image this large is a photo someone pasted, not a signature logo.
 INLINE_IMAGE_MIN_BYTES = 20 * 1024
 
@@ -62,23 +64,47 @@ def inbound_token(address: str, domain: str) -> str | None:
     return local.split("+", 1)[0]
 
 
+def authserv_id(header: str) -> str:
+    """The authserv-id naming who made the verdict: the first token of the
+    header, before the version and the first ';' (RFC 8601 s.2.2)."""
+    first = header.split(";", 1)[0].strip().split()
+    return first[0].lower() if first else ""
+
+
 def sender_authenticated(msg: EmailMessage, sender: str | None) -> bool:
-    """True when the provider's verdict says the From domain is genuine:
-    DMARC passed, or DKIM passed for the From domain (or a parent of it)."""
+    """True when *our* provider's verdict says the From domain is genuine:
+    DMARC passed, or DKIM passed for the From domain exactly.
+
+    Only a header whose authserv-id matches `settings.inbound_authserv_id` is
+    read (RFC 8601 s.5): anyone can add an Authentication-Results header, so
+    the id is what separates the receiving provider's verdict from one the
+    sender wrote themselves. Without that setting nothing is authenticated
+    and mail waits in quarantine for a guardian, which is the safe failure.
+
+    A parent domain's signature does not authenticate a subdomain here; that
+    is relaxed DMARC alignment, and the dmarc=pass branch already covers it.
+    """
     if not sender or "@" not in sender:
         return False
-    results = msg.get_all("Authentication-Results") or []
-    if not results:
+    trusted = (settings.inbound_authserv_id or "").strip().lower()
+    if not trusted:
         return False
-    verdict = str(results[0]).lower()
     domain = sender.rsplit("@", 1)[1]
+    for raw in msg.get_all("Authentication-Results") or []:
+        header = str(raw)
+        if authserv_id(header) != trusted:
+            continue
+        # The provider prepends its own verdict, so the first header bearing
+        # our authserv-id is genuine; a forged copy sits below it, unread.
+        return _passes(header.lower(), domain)
+    return False
+
+
+def _passes(verdict: str, domain: str) -> bool:
     if re.search(r"\bdmarc=pass\b", verdict):
         return True
-    for match in re.finditer(r"\bdkim=pass\b[^;]*?header\.d=([a-z0-9.-]+)", verdict):
-        signer = match.group(1).rstrip(".")
-        if domain == signer or domain.endswith("." + signer):
-            return True
-    return False
+    return any(match.group(1).rstrip(".") == domain
+               for match in re.finditer(r"\bdkim=pass\b[^;]*?header\.d=([a-z0-9.-]+)", verdict))
 
 
 def _attachments(msg: EmailMessage):

@@ -30,7 +30,11 @@ stored:
 2. **Identify.** A signed-in member for uploads. For email, the From address
    must belong to a member of the household the message was sent to, and the
    receiving provider must have authenticated it (DMARC pass, or DKIM pass for
-   the From domain).
+   the From domain exactly). The verdict is read only from the
+   `Authentication-Results` header whose authserv-id is
+   `FAMILYOS_INBOUND_AUTHSERV_ID`: anyone can write that header, and the id is
+   what tells our provider's verdict from the sender's own. Unset, nothing
+   authenticates and every message waits in quarantine.
 3. **Decide.** Accept, quarantine or reject. Mail from an unknown or
    unauthenticated sender is quarantined: stored, but invisible until a
    guardian accepts it and says whose it is. Rejected items (empty, too large,

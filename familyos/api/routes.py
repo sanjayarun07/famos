@@ -8,7 +8,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile, status
 
 from familyos import artifacts, audit, consent, erasure, identity
-from familyos.api.deps import current_member
+from familyos.api.deps import current_member, erasure_reader
 from familyos.extraction import service as extraction
 from familyos.identity import Principal
 from familyos.intake import gateway
@@ -102,8 +102,10 @@ async def erase_member(member_id: uuid.UUID, p: Principal = Depends(current_memb
     return Erasure(**await erasure.request_subject_erasure(p, member_id, reason="member_erased", delete_member=True))
 
 
-@router.get("/erasures/{erasure_id}", response_model=Erasure, tags=["erasure"])
-async def get_erasure(erasure_id: uuid.UUID, p: Principal = Depends(current_member)):
+@router.get("/erasures/{erasure_id}", response_model=Erasure, tags=["erasure"],
+            description="Progress of an erasure. Readable while a household erasure runs, which is the only "
+                        "request an erasing household still answers; once it finishes there is nobody left to ask.")
+async def get_erasure(erasure_id: uuid.UUID, p: Principal = Depends(erasure_reader)):
     return Erasure(**await erasure.get(p.household_id, erasure_id))
 
 

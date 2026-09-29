@@ -103,10 +103,14 @@ async def _erase_subject(job: dict, ctx: jobs.JobContext) -> dict:
     if not ctx.done("0"):
         await ctx.step("0")
         async with pool().acquire() as conn, conn.transaction():
+            blob_ids = [r["blob_id"] for r in await conn.fetch(
+                "SELECT blob_id FROM input_artifacts WHERE household_id = $1 AND (id IN "
+                "(SELECT artifact_id FROM artifact_subjects WHERE member_id = $2) OR parent_id IN "
+                "(SELECT artifact_id FROM artifact_subjects WHERE member_id = $2))", household_id, member_id)]
             deleted = await conn.fetch(
                 "DELETE FROM input_artifacts WHERE household_id = $1 AND id IN "
                 "(SELECT artifact_id FROM artifact_subjects WHERE member_id = $2) RETURNING id", household_id, member_id)
-            keys = await artifacts.drop_orphan_blobs(conn, household_id)
+            keys = await artifacts.drop_orphan_blobs(conn, household_id, blob_ids)
             # Extraction jobs for those artifacts may still hold a cached model answer.
             await conn.execute("DELETE FROM jobs WHERE household_id = $1 AND kind = 'extract_artifact' "
                                "AND spec->>'artifact_id' = ANY($2::text[])", household_id, [str(r["id"]) for r in deleted])
