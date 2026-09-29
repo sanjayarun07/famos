@@ -52,7 +52,7 @@ its box: PDF points from the top left, or image pixels.
   fallback when no API key is configured.
 
 `FAMILYOS_EXTRACTOR=auto` (the default) uses the model named by
-`FAMILYOS_EXTRACTION_MODEL` when its provider's key is set
+`FAMILYOS_EXTRACTION_MODEL` (or `RESEARCH_MODEL`) when its provider's key is set
 (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, or the same with a `FAMILYOS_`
 prefix), and the rules otherwise.
 

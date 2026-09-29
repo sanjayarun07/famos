@@ -47,7 +47,8 @@ class Settings(BaseSettings):
     # The model is named provider/model, LiteLLM-style.
     extraction_enabled: bool = True
     extractor: str = "auto"                 # auto | model | rules (claude, openai pick a provider)
-    extraction_model: str = "openai/gpt-5.6-sol"
+    extraction_model: str = Field(default="openai/gpt-5.6-sol",
+                                  validation_alias=AliasChoices("FAMILYOS_EXTRACTION_MODEL", "RESEARCH_MODEL"))
     extraction_effort: str = "medium"
     anthropic_api_key: str = Field(default="", repr=False,
                                    validation_alias=AliasChoices("FAMILYOS_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"))

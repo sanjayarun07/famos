@@ -212,7 +212,10 @@ def test_openai_key_is_read_from_its_usual_name(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
     monkeypatch.delenv("FAMILYOS_OPENAI_API_KEY", raising=False)
-    assert Settings().openai_api_key == "sk-from-env"
+    monkeypatch.setenv("RESEARCH_MODEL", "openai/gpt-5.6-sol")
+    monkeypatch.delenv("FAMILYOS_EXTRACTION_MODEL", raising=False)
+    loaded = Settings()
+    assert loaded.openai_api_key == "sk-from-env" and loaded.extraction_model == "openai/gpt-5.6-sol"
 
 
 # ----------------------------------------------------------------------------
