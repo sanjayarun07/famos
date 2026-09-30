@@ -20,6 +20,7 @@ const store = {
   me: null,
   household: null,
   quarantineCount: 0,
+  amendmentCount: 0,
 };
 
 /* ── plumbing ─────────────────────────────────────────────────── */
@@ -138,6 +139,7 @@ const ROUTES = [
   { path: /^\/notices$/, view: noticesView, nav: 'notices' },
   { path: /^\/today$/, view: todayView, nav: 'today' },
   { path: /^\/quarantine$/, view: quarantineView, nav: 'quarantine' },
+  { path: /^\/revisions$/, view: amendmentsView, nav: 'revisions' },
   { path: /^\/household$/, view: householdView, nav: 'household' },
   { path: /^\/audit$/, view: auditView, nav: 'audit' },
 ];
@@ -174,12 +176,14 @@ function chrome(active) {
   const link = (id, label, extra) =>
     '<a href="#/' + id + '"' + (active === id ? ' aria-current="page"' : '') + '>' + label + (extra || '') + '</a>';
   const badge = store.quarantineCount ? ' <span class="count">' + store.quarantineCount + '</span>' : '';
+  const revBadge = store.amendmentCount ? ' <span class="count amber">' + store.amendmentCount + '</span>' : '';
   return '<header class="top">'
     + '<div class="brand"><b>FamilyOS</b><span>' + esc(store.household ? store.household.name : '') + '</span></div>'
     + '<nav class="nav">'
     + link('notices', 'Notices')
     + link('today', 'Today')
     + (isGuardian ? link('quarantine', 'Quarantine', badge) : '')
+    + link('revisions', 'Revisions', revBadge)
     + link('household', 'Household')
     + (isGuardian ? link('audit', 'Audit') : '')
     + '</nav>'
@@ -287,6 +291,9 @@ async function boot() {
       store.quarantineCount = q.length;
     } catch (e) { store.quarantineCount = 0; }
   }
+  try {
+    store.amendmentCount = (await api('/amendments?status=proposed')).length;
+  } catch (e) { store.amendmentCount = 0; }
   await render();
 }
 
@@ -742,6 +749,7 @@ async function renderObligations(box, artifactId) {
 function obligationRow(o, withLink) {
   const act = ACTION[o.action] || ACTION.note;
   const done = o.status !== 'proposed';
+  const gone = !!o.superseded_at;
   const bits = [o.kind, o.due_date ? 'due ' + date(o.due_date) : null, o.due_time,
     o.subject_member_id ? 'for ' + memberName(o.subject_member_id) : null,
     o.action === 'pay' ? 'reminder only — nothing here pays' : null].filter(Boolean);
@@ -750,7 +758,10 @@ function obligationRow(o, withLink) {
     + '<span class="glyph ' + (done ? 'green' : act.tone) + '" aria-hidden="true">'
     + (o.status === 'accepted' ? '✓' : act.glyph) + '</span>'
     + '<span class="grow"><span class="row wrap" style="gap:7px">'
-    + '<span style="font-size:13.5px;font-weight:600">' + esc(o.title) + '</span>'
+    + '<span style="font-size:13.5px;font-weight:600' + (gone ? ';text-decoration:line-through' : '') + '">'
+    + esc(o.title) + '</span>'
+    + (gone ? '<a class="tag amber" href="#/notices/' + esc(o.superseded_by_artifact_id)
+      + '" style="text-decoration:none">replaced by a later notice</a>' : '')
     + (o.optional ? '<span class="tag line" style="text-transform:none;letter-spacing:0">optional</span>' : '')
     + (done ? '<span class="tag ' + (o.status === 'accepted' ? 'green' : '') + '">' + esc(o.status) + '</span>' : '')
     + '</span><span class="sub">' + esc(bits.join('  ·  '))
@@ -782,7 +793,10 @@ function wireObligationRows(container, rows, withLink) {
 /* ── today ────────────────────────────────────────────────────── */
 
 async function todayView(main) {
-  const proposed = await api('/obligations?status=proposed&limit=200');
+  const [proposed, upcoming] = await Promise.all([
+    api('/obligations?status=proposed&limit=200'),
+    api('/reminders?limit=200'),
+  ]);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const week = new Date(today); week.setDate(week.getDate() + 7);
 
@@ -799,9 +813,12 @@ async function todayView(main) {
   main.innerHTML = '<div class="head"><div><h1>' + esc(date(new Date().toISOString())) + '</h1>'
     + '<p>Proposed from notices you can see. Nothing here has been agreed to yet, and nothing here pays.</p></div>'
     + '<a class="btn ghost" href="#/notices">All notices</a></div>'
+    + '<div class="split"><div>'
     + (proposed.length ? '<div class="stack" style="gap:20px" data-groups></div>'
-      : '<div class="card"><div class="empty">Nothing is waiting on you. Anything a notice asks for shows up here first as a proposal.</div></div>');
+      : '<div class="card"><div class="empty">Nothing is waiting on you. Anything a notice asks for shows up here first as a proposal.</div></div>')
+    + '</div><aside class="stack" data-side></aside></div>';
 
+  renderUpcoming(main.querySelector('[data-side]'), upcoming);
   if (!proposed.length) return;
   const groups = main.querySelector('[data-groups]');
   Object.keys(bucket).forEach((label) => {
@@ -814,6 +831,35 @@ async function todayView(main) {
     groups.appendChild(sec);
     wireObligationRows(sec.querySelector('[data-rows]'), bucket[label], true);
   });
+}
+
+function renderUpcoming(side, reminders) {
+  const pending = reminders.filter((r) => r.status === 'pending');
+  const sent = reminders.filter((r) => r.status === 'sent');
+  side.innerHTML = '<div class="card pad stack" style="gap:11px">'
+    + '<div class="row wrap" style="gap:8px"><h2>You will be told</h2>'
+    + '<span class="muted">' + pending.length + ' to come</span></div>'
+    + (pending.length
+      ? '<div class="stack" style="gap:8px">' + pending.slice(0, 8).map(reminderRow).join('') + '</div>'
+      : '<p class="muted">Nothing queued. A dated task is reminded about before its day.</p>')
+    + (sent.length ? '<p class="muted" style="padding-top:4px;border-top:1px solid var(--line-soft)">'
+      + sent.length + ' already sent.</p>' : '')
+    + '</div>'
+    + '<div class="card pad stack" style="gap:7px">'
+    + '<span style="font-size:12.5px;font-weight:600">Who gets told</span>'
+    + '<span class="muted" style="line-height:1.55">A shared notice reminds the adults and guardians. A private one '
+    + 'reminds only the member who sent it. Children are never told: a task names a child because it is '
+    + '<em>about</em> them.</span></div>';
+}
+
+function reminderRow(r) {
+  const nudge = r.reason === 'undecided';
+  return '<div class="row" style="gap:10px;align-items:flex-start">'
+    + '<span class="lead" aria-hidden="true">' + (r.lead_days === 0 ? 'day' : r.lead_days + 'd') + '</span>'
+    + '<span class="grow"><span style="font-size:12.5px;font-weight:500;display:block">' + esc(r.title) + '</span>'
+    + '<span class="muted">' + (nudge ? 'nudge \u2014 still undecided' : 'due ' + esc(date(r.due_date)))
+    + '  \u00B7  ' + esc(ago(r.send_after).replace(' ago', ' from now').replace('just now', 'now')) + '</span></span>'
+    + '</div>';
 }
 
 /* ── quarantine ───────────────────────────────────────────────── */
@@ -898,6 +944,86 @@ async function quarantineView(main) {
     });
   });
 }
+
+/* -- revisions -------------------------------------------------- */
+
+async function amendmentsView(main) {
+  const proposed = await api('/amendments?status=proposed&limit=200');
+  const all = await api('/amendments?status=&limit=200');
+  const settled = all.filter((a) => a.status !== 'proposed');
+  store.amendmentCount = proposed.length;
+
+  main.innerHTML = '<div class="head"><div><h1>Revisions</h1>'
+    + '<p style="max-width:780px">A notice that looks like it changes an earlier one. Matching two notices by their '
+    + 'words is a guess, so nothing is applied until you say so. Until then <b>both still remind you</b>, and the '
+    + 'reminder for the older one says a later notice may have changed it.</p></div></div>'
+    + (proposed.length ? '<div class="stack" data-proposed></div>'
+      : '<div class="card"><div class="empty">Nothing is waiting. When a notice revises an earlier one, the link to '
+        + 'confirm shows up here.</div></div>')
+    + (settled.length ? '<h2 style="margin:26px 0 12px">Already decided</h2><div class="card list" data-settled></div>' : '');
+
+  if (proposed.length) {
+    const box = main.querySelector('[data-proposed]');
+    box.innerHTML = proposed.map(amendmentCard).join('');
+    box.querySelectorAll('[data-decide]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const status = btn.dataset.decide;
+        if (status === 'confirmed'
+          && !confirm('Confirm that this replaces the earlier notice?\n\nThe earlier notice’s tasks are superseded '
+            + 'and stop reminding. If the two are not actually the same thing, nobody will be reminded about the '
+            + 'earlier one again.')) return;
+        btn.disabled = true;
+        try {
+          const out = await api('/amendments/' + btn.dataset.id + '/decision', { method: 'POST', json: { status } });
+          flash(status === 'confirmed'
+            ? 'Linked. ' + out.obligations_superseded + ' task'
+              + (out.obligations_superseded === 1 ? '' : 's') + ' superseded.'
+            : 'Left as two separate notices.');
+          await render();
+        } catch (err) { fail(err); btn.disabled = false; }
+      });
+    });
+  }
+
+  if (settled.length) {
+    main.querySelector('[data-settled]').innerHTML = settled.map((a) =>
+      '<div class="item" style="cursor:default">'
+      + '<span class="tag ' + (a.status === 'confirmed' ? 'green' : '') + '">' + esc(a.status) + '</span>'
+      + '<span class="grow"><span class="title">' + esc(a.claim_title) + '</span>'
+      + '<span class="sub">' + (a.status === 'confirmed' ? 'replaced' : 'kept separate from') + ' “'
+      + esc(a.amends_title) + '”  ·  ' + esc(memberName(a.decided_by) || 'a member')
+      + '  ·  ' + esc(ago(a.decided_at)) + '</span></span></div>').join('');
+  }
+}
+
+function amendmentCard(a) {
+  const pct = Math.round(Number(a.score) * 100);
+  return '<article class="card pad stack" style="gap:16px">'
+    + '<div class="row wrap" style="gap:10px">'
+    + '<span class="glyph amber" aria-hidden="true">⇄</span>'
+    + '<span class="grow"><span style="font-size:15px;font-weight:600">This looks like a revision</span>'
+    + '<span class="sub">matched on ' + esc(a.matched_on) + '</span></span>'
+    + '<span class="tag ' + (pct >= 70 ? 'green' : 'amber') + '">' + pct + '% match</span>'
+    + '</div>'
+    + '<div class="revision">'
+    + '<div class="side"><div class="label">The newer notice says</div>'
+    + '<a class="ref" href="#/notices/' + esc(a.artifact_id) + '">' + esc(a.claim_title) + '</a>'
+    + (a.change ? '<p class="change">“' + esc(a.change) + '”</p>' : '')
+    + '</div>'
+    + '<div class="arrow" aria-hidden="true">replaces</div>'
+    + '<div class="side old"><div class="label">The earlier notice</div>'
+    + '<a class="ref" href="#/notices/' + esc(a.amends_artifact_id) + '">' + esc(a.amends_title) + '</a>'
+    + (a.amends_date ? '<p class="change">was ' + esc(date(a.amends_date)) + '</p>' : '')
+    + '</div></div>'
+    + '<div class="row wrap" style="gap:10px">'
+    + '<span class="muted" style="max-width:520px;line-height:1.5">Confirming supersedes the earlier notice’s '
+    + 'tasks and stops their reminders. Rejecting leaves both standing.</span>'
+    + '<span class="grow"></span>'
+    + '<button class="btn ghost" data-decide="rejected" data-id="' + esc(a.id) + '">Not the same thing</button>'
+    + '<button class="btn" data-decide="confirmed" data-id="' + esc(a.id) + '">Confirm the revision</button>'
+    + '</div></article>';
+}
+
 
 /* ── household ────────────────────────────────────────────────── */
 
