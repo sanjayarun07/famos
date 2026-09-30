@@ -61,6 +61,14 @@ are the same, which needs sight of both, so a private notice cannot be linked
 away by someone who was never shown it. The list and the decision endpoint use
 the same visibility rule as everything else, applied twice.
 
+## In the console
+
+**Revisions** (`/app/#/revisions`) shows each proposed link as the two notices
+side by side -- what the newer one says, what it replaces, the match score and
+the words it matched on -- with Confirm and Reject. The nav carries a count, and
+a superseded task stays on Today struck through, linking to the notice that
+replaced it, rather than quietly disappearing.
+
 ## API
 
 | Method | Path | Who |
