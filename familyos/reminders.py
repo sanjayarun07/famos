@@ -176,11 +176,29 @@ async def _send_email(row: dict, subject: str, body: str) -> None:
     await asyncio.to_thread(deliver)
 
 
-CHANNELS = {"log": _send_log, "email": _send_email}
+async def _send_whatsapp(row: dict, subject: str, body: str) -> None:
+    """Where the parent is already looking. Email is checked on Sundays;
+    WhatsApp is checked at traffic lights."""
+    if not settings.whatsapp_access_token or not settings.whatsapp_phone_number_id:
+        raise RuntimeError("FAMILYOS_WHATSAPP_ACCESS_TOKEN and _PHONE_NUMBER_ID are not set")
+    if not row.get("phone"):
+        raise RuntimeError("that member has no phone number")
+    import httpx
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.post(
+            f"{settings.whatsapp_api_base}/{settings.whatsapp_phone_number_id}/messages",
+            headers={"Authorization": "Bearer " + settings.whatsapp_access_token},
+            json={"messaging_product": "whatsapp", "to": row["phone"], "type": "text",
+                  "text": {"body": subject + "\n\n" + body}})
+        r.raise_for_status()
+
+
+CHANNELS = {"log": _send_log, "email": _send_email, "whatsapp": _send_whatsapp}
 
 _DUE = """
 SELECT r.*, o.title, o.action, o.due_date, o.subject_member_id, m.email, m.display_name,
-       a.received_at, c.subject_name,
+       m.phone, a.received_at, c.subject_name,
        EXISTS (SELECT 1 FROM amendments am
                WHERE am.amends_claim_id = o.claim_id AND am.status = 'proposed') AS contested
 FROM reminders r

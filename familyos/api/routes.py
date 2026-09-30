@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import uuid
 from urllib.parse import quote
 
@@ -12,6 +13,7 @@ from familyos.api.deps import current_member, erasure_reader
 from familyos.extraction import service as extraction
 from familyos.identity import Principal
 from familyos.intake import gateway
+from familyos.intake import whatsapp as whatsapp_adapter
 from familyos.models import (
     Amendment,
     AmendmentDecisionIn,
@@ -270,6 +272,43 @@ async def inbound_email(request: Request, x_familyos_webhook_secret: str = Heade
     row, duplicate = await gateway.receive_email(raw, recipient=x_familyos_recipient)
     # The sender is not told whether their mail was accepted or quarantined.
     return {"received": True, "duplicate": duplicate, "status": row["status"], "id": str(row["id"])}
+
+
+# ----------------------------------------------------------------------------
+# WhatsApp (called by Meta)
+# ----------------------------------------------------------------------------
+
+@router.get("/inbound/whatsapp", include_in_schema=False)
+async def whatsapp_verify(request: Request):
+    """Meta's one-time subscription handshake: echo the challenge when the
+    token matches."""
+    q = request.query_params
+    if q.get("hub.mode") == "subscribe" and settings.whatsapp_verify_token and hmac.compare_digest(
+            (q.get("hub.verify_token") or "").encode(), settings.whatsapp_verify_token.encode()):
+        return Response(content=q.get("hub.challenge") or "", media_type="text/plain")
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "bad verify token")
+
+
+@router.post("/inbound/whatsapp", status_code=202, tags=["intake"],
+             description="Meta Cloud API webhook. Every delivery is checked against the app secret before it is "
+                         "read. A message from a number that belongs to no member is refused and not stored.")
+async def inbound_whatsapp(request: Request, x_hub_signature_256: str | None = Header(None)):
+    raw = await request.body()
+    try:
+        whatsapp_adapter.verify_signature(raw, x_hub_signature_256, settings.whatsapp_app_secret)
+    except whatsapp_adapter.BadSignature as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+    received, refused = 0, 0
+    for message in whatsapp_adapter.parse(json.loads(raw or b"{}")):
+        try:
+            stored = await gateway.receive_whatsapp(message)
+            received += len(stored)
+        except gateway.Rejected:
+            # Meta retries anything that is not 2xx, and a message we cannot
+            # place will never become placeable: take it and drop it.
+            refused += 1
+    return {"received": received, "refused": refused}
 
 
 # ----------------------------------------------------------------------------

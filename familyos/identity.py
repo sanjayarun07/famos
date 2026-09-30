@@ -21,6 +21,7 @@ import asyncpg
 
 from familyos import audit, crypto
 from familyos.db import pool
+from familyos.intake.whatsapp import normalise_phone
 from familyos.models import HouseholdIn, MemberIn
 from familyos.settings import settings
 
@@ -95,16 +96,19 @@ async def add_member(actor: Principal, data: MemberIn) -> tuple[dict, str | None
         raise Invalid("a child member has no email address in v1")
     if data.role != "child" and not data.email:
         raise Invalid("a guardian or adult member needs an email address")
+    phone = normalise_phone(data.phone) if data.role != "child" else None
+    if data.role == "child" and data.phone:
+        raise Invalid("a child member has no phone number in v1")
     member_id = uuid.uuid4()
     async with pool().acquire() as conn, conn.transaction():
         try:
             member = await conn.fetchrow(
-                "INSERT INTO members (id, household_id, display_name, role, email, date_of_birth) "
-                "VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+                "INSERT INTO members (id, household_id, display_name, role, email, phone, date_of_birth) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
                 member_id, actor.household_id, data.display_name, data.role,
-                str(data.email).lower() if data.email else None, data.date_of_birth)
+                str(data.email).lower() if data.email else None, phone, data.date_of_birth)
         except asyncpg.UniqueViolationError as exc:
-            raise Invalid("a member with this email already exists in the household") from exc
+            raise Invalid("a member with this email or phone number already exists in the household") from exc
         token = await _issue_token(conn, member_id) if data.role != "child" else None
         await audit.record(actor.household_id, "member.added", actor_member_id=actor.member_id, target_type="member",
                            target_id=member_id, detail={"role": data.role}, conn=conn)
@@ -207,6 +211,25 @@ async def get_member(household_id: uuid.UUID, member_id: uuid.UUID) -> dict:
 async def household_by_inbound_token(inbound_token: str) -> dict | None:
     row = await pool().fetchrow("SELECT * FROM households WHERE inbound_token = $1 AND status = 'active'", inbound_token)
     return dict(row) if row else None
+
+
+async def member_by_phone(number: str) -> dict | None:
+    """The member a WhatsApp number belongs to, and so the household a
+    forwarded message lands in. There is no per-household WhatsApp address the
+    way there is for email -- every message arrives at one business number --
+    so the sender is the only thing that can place it.
+
+    A number in two households is ambiguous and places nothing: guessing which
+    family a school notice belongs to is not a guess worth making."""
+    from familyos.intake.whatsapp import phone_variants
+
+    rows = await pool().fetch(
+        "SELECT m.* FROM members m JOIN households h ON h.id = m.household_id "
+        "WHERE m.phone = ANY($1::text[]) AND m.role <> 'child' AND h.status = 'active'",
+        phone_variants(number))
+    if len(rows) != 1:
+        return None
+    return dict(rows[0])
 
 
 async def member_by_email(household_id: uuid.UUID, email: str) -> dict | None:
