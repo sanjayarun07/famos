@@ -497,8 +497,11 @@ function noticeHeader(a) {
     + (claimsFrom ? '<span class="muted">from <b style="color:var(--ink);font-weight:500">' + esc(claimsFrom) + '</b></span>' : '')
     + (a.submitted_by ? '<span class="muted">' + esc(memberName(a.submitted_by)) + '</span>' : '')
     + '<span class="muted">' + esc(date(a.received_at)) + '</span>'
-    + (a.source && a.source.from
+    + (a.source && a.source.from && a.channel !== 'whatsapp' && a.channel !== 'whatsapp_media'
         ? '<span class="tag ' + (auth ? 'green' : 'red') + '">' + (auth ? 'sender authenticated' : 'sender not authenticated') + '</span>'
+        : '')
+    + (a.source && a.source.forwarded
+        ? '<span class="tag amber" title="Relayed by someone, not issued by the school">second-hand</span>'
         : '')
     + '</p></div>'
     + '<div class="row">'
@@ -567,6 +570,11 @@ function renderSide(side, artifact, extraction, id) {
       + (x.actionable ? '' : '<span class="tag">asks nothing of you</span>')
       + '</div>'
       + (x.non_actionable_reason ? '<p class="muted">' + esc(x.non_actionable_reason) + '</p>' : '')
+      + (artifact.source && artifact.source.forwarded
+        ? '<p class="muted" style="padding:9px 11px;background:var(--amber-tint);border-radius:6px;line-height:1.5">'
+          + 'Forwarded, so this is somebody\u2019s retelling rather than the school\u2019s own notice. '
+          + 'These claims are held a little less confidently until the original turns up.</p>'
+        : '')
       + '</div>';
   } else {
     const status = extraction ? extraction.job_status : null;
@@ -798,7 +806,7 @@ function obligationRow(o, withLink) {
     + '<span style="font-size:13.5px;font-weight:600' + (gone ? ';text-decoration:line-through' : '') + '">'
     + esc(o.title) + '</span>'
     + (gone ? '<a class="tag amber" href="#/notices/' + esc(o.superseded_by_artifact_id)
-      + '" style="text-decoration:none">replaced by a later notice</a>' : '')
+      + '" style="text-decoration:none">superseded \u2014 see the notice this came from</a>' : '')
     + (o.optional ? '<span class="tag line" style="text-transform:none;letter-spacing:0">optional</span>' : '')
     + (done ? '<span class="tag ' + (o.status === 'accepted' ? 'green' : '') + '">' + esc(o.status) + '</span>' : '')
     + '</span><span class="sub">' + esc(bits.join('  ·  '))

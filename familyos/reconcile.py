@@ -133,6 +133,41 @@ async def propose(conn: asyncpg.Connection, household_id: uuid.UUID, artifact_id
     return made
 
 
+async def merge_exact_duplicate(conn: asyncpg.Connection, household_id: uuid.UUID,
+                                artifact_id: uuid.UUID) -> dict | None:
+    """When the very same bytes already arrived, the later copy’s tasks are
+    superseded by the first.
+
+    A parents’ group makes this the normal case: three people relay the same
+    circular and the family is told three times about one consent form. Storage
+    has always deduplicated the bytes -- one blob however many members send it
+    -- but two artifacts each proposed their own obligations.
+
+    Unlike an amendment this needs nobody’s confirmation. Matching two notices
+    by their words is a guess; matching them by SHA-256 is not. Both artifacts
+    stay: two parents did send it, and that is worth keeping.
+    """
+    first = await conn.fetchrow(
+        "SELECT a.id, a.received_at, a.submitted_by FROM input_artifacts a "
+        "JOIN input_artifacts mine ON mine.blob_id = a.blob_id "
+        "WHERE mine.id = $1 AND a.household_id = $2 AND a.id <> $1 AND a.status = \'accepted\' "
+        "AND (a.received_at, a.id) < (mine.received_at, mine.id) "
+        "ORDER BY a.received_at, a.id LIMIT 1", artifact_id, household_id)
+    if first is None:
+        return None
+    superseded = await conn.fetch(
+        "UPDATE obligations SET superseded_at = NOW(), superseded_by_artifact_id = $2 "
+        "WHERE artifact_id = $1 AND superseded_at IS NULL RETURNING id", artifact_id, first["id"])
+    if superseded:
+        await conn.execute(
+            "UPDATE reminders SET status = \'cancelled\' WHERE status = \'pending\' "
+            "AND obligation_id = ANY($1::uuid[])", [r["id"] for r in superseded])
+    await audit.record(household_id, "artifact.duplicate_merged", actor_kind="system", target_type="artifact",
+                       target_id=artifact_id, detail={"first_artifact_id": str(first["id"]),
+                                                      "obligations_superseded": len(superseded)}, conn=conn)
+    return {"first_artifact_id": str(first["id"]), "obligations_superseded": len(superseded)}
+
+
 # ----------------------------------------------------------------------------
 # reading and deciding
 # ----------------------------------------------------------------------------
