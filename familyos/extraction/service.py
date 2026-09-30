@@ -20,7 +20,7 @@ import uuid
 
 import asyncpg
 
-from familyos import artifacts, audit, jobs
+from familyos import artifacts, audit, consent, jobs
 from familyos.db import pool
 from familyos.extraction import pipeline
 from familyos.extraction.claims import Extraction
@@ -99,6 +99,12 @@ async def _accepted_artifact(household_id: uuid.UUID, artifact_id: uuid.UUID) ->
     return dict(row) if row else None
 
 
+def _permitted_name(subject_name: str | None, allowed: list[tuple[uuid.UUID, str]]) -> str | None:
+    if not subject_name:
+        return None
+    return subject_name if any(consent.names_match(subject_name, d) for _, d in allowed) else None
+
+
 async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extraction, *,
                job_id: uuid.UUID | None = None) -> dict:
     """Store an extraction, its claims and proposed obligations; supersede the
@@ -112,6 +118,13 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
         subjects = await conn.fetch("SELECT DISTINCT member_id FROM artifact_subjects WHERE artifact_id = $1 OR artifact_id = $2",
                                     artifact_id, artifact["parent_id"])
         subject = subjects[0]["member_id"] if len(subjects) == 1 else None
+        # A claim may name a child only when that child has active consent,
+        # the same rule artifact_subjects enforces. An extractor that reads a
+        # name off the notice does not get to record it otherwise, and a name
+        # matching nobody is dropped rather than kept on the chance it is safe.
+        allowed = await consent.consented_children(conn, household_id)
+        named = [c.subject_name for c in extraction.claims if c.subject_name]
+        dropped = sum(1 for n in named if not any(consent.names_match(n, d) for _, d in allowed))
         await conn.execute("UPDATE extractions SET superseded_at = NOW() WHERE artifact_id = $1 AND superseded_at IS NULL",
                            artifact_id)
         decided = {(r["title"], r["due_date"]) for r in await conn.fetch(
@@ -134,7 +147,8 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
             "$10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)",
             [(claim_ids[i], extraction_id, household_id, artifact_id, i, c.kind, c.title, c.date, c.end_date, c.date_text,
               c.time, c.place, c.amount.value if c.amount else None, c.amount.currency if c.amount else None,
-              c.amount.text if c.amount else None, c.applies_to, c.subject_name, list(c.requires), c.optional, c.uncertain,
+              c.amount.text if c.amount else None, c.applies_to, _permitted_name(c.subject_name, allowed),
+              list(c.requires), c.optional, c.uncertain,
               c.amends, c.change, c.quote, c.page, (c.location or {}).get("start"), (c.location or {}).get("end"),
               (c.location or {}).get("boxes"), (c.location or {}).get("match"), c.confidence)
              for i, c in enumerate(extraction.claims)])
@@ -147,7 +161,7 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
         counts = {"extraction_id": str(extraction_id), "claims": len(claim_ids),
                   "grounded": sum(1 for c in extraction.claims if c.grounded), "obligations": len(rows),
                   "actionable": extraction.actionable, "extractor": x.name, "model": x.model,
-                  "prompt_version": x.prompt_version}
+                  "prompt_version": x.prompt_version, "names_dropped": dropped}
         await audit.record(household_id, "extraction.completed", actor_kind="system", target_type="artifact",
                            target_id=artifact_id, detail=counts, conn=conn)
     return counts

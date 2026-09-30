@@ -63,7 +63,8 @@ prefix), and the rules otherwise.
 notice gives no exact date, `date_text` with `uncertain` set; `time`,
 `place`, `amount` (value, currency, text as written), `applies_to` (the
 class or group it is scoped to), `subject_name` (only when a student is
-named), `requires` (`parent_signature`, `form_return`, `payment`,
+named, and only kept for a consented child of the household), `requires`
+(`parent_signature`, `form_return`, `payment`,
 `parent_attendance`, `medical_info`, `items_to_bring`), `optional`, and for
 amendments `amends`/`change`. Every claim records the extractor, model,
 prompt version and parser version on its extraction, and a confidence.
@@ -94,8 +95,16 @@ obligations still `proposed`; accepted and dismissed ones stay.
 
 ### Privacy
 
-- Claims and obligations cascade with their artifact, so deleting a notice,
-  withdrawing a child's consent, or erasing the household erases them.
+- A claim names a child (`subject_name`) only when that child is a member of
+  the household with active consent, the same rule `artifact_subjects`
+  enforces. A name the extractor reads off a notice that matches no consented
+  child is dropped before it is stored; the fact the notice states is kept.
+  The extraction's audit event counts the drops as `names_dropped`.
+- Claims and obligations cascade with their artifact, so deleting a notice or
+  erasing the household erases them. Withdrawing a child's consent erases the
+  artifacts linked to that child, and clears their name from claims on
+  notices that merely mention them, which are not the child's to delete
+  (`names_cleared` in the erasure log).
 - The model's answer is cached in the job only while the job runs (so a
   resume does not pay twice) and cleared once the claims are stored.
   Subject erasure also deletes extraction jobs for the erased artifacts.

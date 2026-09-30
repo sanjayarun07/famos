@@ -367,3 +367,75 @@ async def test_the_scorer_matches_claims_to_labels(tmp_path):
     assert r["expect_no_violations"] == ["event date"]
     assert summary["recall"]["all"][:2] == [2, 3] and summary["fields"]["form"] == [1, 1, 1.0]
     assert meta["extractor"] == "rules" and "Facts found" in evaluate.render(summary, results, meta)
+
+
+# ----------------------------------------------------------------------------
+# a claim may name a child only on the same terms as artifact_subjects
+# ----------------------------------------------------------------------------
+
+def _names_child(child_name: str):
+    """What the model extractor produces when a notice names a student."""
+    from familyos.extraction.claims import Extraction, ExtractorInfo
+    return Extraction(
+        extractor=ExtractorInfo(name="openai", model="openai/gpt-5.6-sol",
+                                prompt_version=PROMPT_VERSION, parser_version="p1"),
+        reference_date=None, actionable=True, page_count=1,
+        claims=[Claim(kind="deadline", title="Return trip consent slip", subject_name=child_name,
+                      quote="Return the slip", confidence=0.9)])
+
+
+async def test_a_claim_cannot_name_a_child_without_consent(family, database):
+    """Milestone 1 refuses to name a child as a subject without consent; an
+    extractor reading the name off the notice gets no exemption."""
+    from familyos.extraction import service
+    artifact_id = (await family.upload("amma", make_pdf(TRIP))).json()["artifact"]["id"]
+    assert await database.fetchval("SELECT count(*) FROM consent_records") == 0
+    r = await family.client.put(f"/v1/artifacts/{artifact_id}/subjects", headers=family.h("amma"),
+                                json=[family.older["id"]])
+    assert r.status_code == 409 and r.json()["error"] == "consent_required"
+
+    counts = await service.save(uuid.UUID(family.household["id"]), uuid.UUID(artifact_id),
+                                _names_child("Older one Arun"))
+    assert counts["names_dropped"] == 1
+    assert await database.fetchval("SELECT subject_name FROM claims WHERE artifact_id = $1",
+                                   uuid.UUID(artifact_id)) is None
+    # The fact the notice states is still recorded; only the child's name is not.
+    assert await database.fetchval("SELECT title FROM claims WHERE artifact_id = $1",
+                                   uuid.UUID(artifact_id)) == "Return trip consent slip"
+
+
+async def test_a_name_matching_nobody_in_the_household_is_dropped(family, database):
+    from familyos.extraction import service
+    await family.consent(family.older)
+    artifact_id = (await family.upload("amma", make_pdf(TRIP))).json()["artifact"]["id"]
+    counts = await service.save(uuid.UUID(family.household["id"]), uuid.UUID(artifact_id),
+                                _names_child("Some Other Child"))
+    assert counts["names_dropped"] == 1
+    assert await database.fetchval("SELECT subject_name FROM claims") is None
+
+
+async def test_withdrawing_consent_clears_the_name_from_notices_not_linked_to_the_child(family, database):
+    """Subject erasure deletes artifacts linked to the child. A notice that
+    merely mentions them is not theirs to delete, but their name goes."""
+    from familyos.extraction import service
+    consent = await family.consent(family.older)
+    artifact_id = (await family.upload("amma", make_pdf(TRIP))).json()["artifact"]["id"]   # no subject link
+    await service.save(uuid.UUID(family.household["id"]), uuid.UUID(artifact_id), _names_child("Older one Arun"))
+    assert await database.fetchval("SELECT subject_name FROM claims") == "Older one Arun"
+
+    r = await family.client.post(f"/v1/consents/{consent['id']}/withdraw", headers=family.h("amma"))
+    assert r.status_code == 202, r.text
+    job_id = await database.fetchval("SELECT job_id::text FROM erasure_log WHERE id = $1", uuid.UUID(r.json()["id"]))
+    assert (await jobs.attach(job_id))["status"] == "succeeded"
+    assert await database.fetchval("SELECT subject_name FROM claims") is None
+    assert await database.fetchval("SELECT title FROM claims") == "Return trip consent slip"
+    counts = await database.fetchval("SELECT counts FROM erasure_log WHERE id = $1", uuid.UUID(r.json()["id"]))
+    assert counts["names_cleared"] == 1
+
+
+def test_names_match_reads_both_ways_but_not_across_children():
+    from familyos.consent import names_match
+    assert names_match("Rahul", "Rahul Sharma") and names_match("Rahul Sharma", "Rahul")
+    assert names_match("older one arun", "Older One Arun")
+    assert not names_match("Rahul Sharma", "Priya Sharma")
+    assert not names_match("Rahul", None) and not names_match("", "Rahul")
