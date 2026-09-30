@@ -36,6 +36,16 @@ class Settings(BaseSettings):
 
     inbound_domain: str = "in.familyos.local"
     inbound_webhook_secret: str = Field(default="", repr=False)
+    # WhatsApp Cloud API. Parents forward school messages to this business
+    # number; Meta has already verified the sender, so a number that belongs to
+    # a member is trusted and one that belongs to nobody is refused.
+    # app_secret signs every delivery: without it nothing is accepted.
+    whatsapp_app_secret: str = Field(default="", repr=False)
+    whatsapp_verify_token: str = Field(default="", repr=False)
+    whatsapp_access_token: str = Field(default="", repr=False)
+    whatsapp_phone_number_id: str = ""
+    whatsapp_api_base: str = "https://graph.facebook.com/v21.0"
+
     # Quarantine mail whose From address is not authenticated (DMARC, or
     # DKIM/SPF aligned) by the receiving provider.
     require_sender_auth: bool = True

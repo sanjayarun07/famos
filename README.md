@@ -22,7 +22,8 @@ calendar entries for a member to accept or dismiss. See
 the test set.
 
 See [docs/architecture.md](docs/architecture.md) for how it fits together,
-[docs/reminders.md](docs/reminders.md) for how the family gets told,
+[docs/whatsapp.md](docs/whatsapp.md) for the channel most school traffic
+actually uses, [docs/reminders.md](docs/reminders.md) for how the family gets told,
 [docs/reconciliation.md](docs/reconciliation.md) for revised notices, and
 [docs/provenance.md](docs/provenance.md) for code taken from Orbit.
 
@@ -82,6 +83,7 @@ ruff check .
 | DELETE | `/v1/artifacts/{id}` | the submitter, or a guardian if shared |
 | GET | `/v1/quarantine`; POST `/v1/quarantine/{id}/accept`, `/reject` | guardians |
 | POST | `/v1/inbound/email` | the mail provider |
+| POST | `/v1/inbound/whatsapp` | Meta Cloud API: what a parent forwards |
 | POST, GET | `/v1/consents`; POST `/v1/consents/{id}/withdraw` | guardians |
 | POST | `/v1/members/{id}/erase`, `/v1/household/erase` | guardians |
 | GET | `/v1/erasures/{id}` | members |

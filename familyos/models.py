@@ -15,6 +15,9 @@ class MemberIn(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
     role: Role
     email: EmailStr | None = None
+    # The number they forward from on WhatsApp. Any shape a person types;
+    # stored as digits.
+    phone: str | None = Field(default=None, max_length=24)
     date_of_birth: date | None = None
 
 
@@ -34,6 +37,7 @@ class Member(BaseModel):
     display_name: str
     role: Role
     email: str | None = None
+    phone: str | None = None
     date_of_birth: date | None = None
     created_at: datetime
 
