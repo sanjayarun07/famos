@@ -1,0 +1,79 @@
+# Reconciliation (milestone 3, part two)
+
+A school sends "Annual day, revised timings" and the earlier notice is still
+sitting there with its own date. Before this, both reminded and nothing said
+they were the same thing.
+
+Extraction already reads an `amendment` claim out of the new notice, saying in
+the notice's own words what it changes (`claims.amends`) and what is now true
+(`claims.change`). What was missing was the link from that claim to the
+**artifact** it is talking about.
+
+## The link is proposed, never applied on its own
+
+Matching two notices by their words is a guess, and the cost of guessing wrong
+is lopsided:
+
+- A wrong link **stops** the family being reminded about a deadline that still
+  stands. They miss it, and nothing tells them.
+- A missing link means they are reminded **twice** about something already
+  settled. Annoying, and obvious the moment they read it.
+
+So a member confirms it, the same way quarantine needs a guardian and a
+proposed obligation needs accepting. Until then **both notices still remind** —
+and the reminder for the older one says a later notice looks like it changes
+this and nobody has confirmed that yet.
+
+## Matching
+
+No model. An amendment claim's words are compared with the titles of earlier
+claims in the same household:
+
+1. Words are lowercased, split, and stripped of the ones every notice uses —
+   `circular`, `dear`, `parents`, `revised`, `rescheduled`, `school`, and so
+   on. A notice saying "Revised circular: the annual day" is about `annual
+   day`; the rest is packaging.
+2. The score is the overlap of the amendment's words (its own title plus what
+   it says it amends) against the candidate's title, as a share of the two sets
+   together.
+3. `+0.15` when both are scoped to the same group (`applies_to`), `+0.05` when
+   the candidate is a dated event or deadline.
+4. Below `MIN_SCORE` (0.42), or fewer than two shared words, proposes nothing.
+
+Deliberately conservative: a near miss should propose nothing rather than
+guess. The stored row keeps the `score` and a plain-words `matched_on` ("3
+shared words, same group, dated") so a person deciding can see why.
+
+## Confirming
+
+| | |
+|---|---|
+| **confirmed** | the older claim's obligations get `superseded_at` and `superseded_by_artifact_id`; their pending reminders are cancelled, and the sweep will not make more |
+| **rejected** | both notices stand, unchanged |
+
+A superseded obligation is not deleted. It keeps its row, so "what happened to
+that?" has an answer.
+
+## Who may decide
+
+Only a member who can see **both** notices. Confirming says these two things
+are the same, which needs sight of both, so a private notice cannot be linked
+away by someone who was never shown it. The list and the decision endpoint use
+the same visibility rule as everything else, applied twice.
+
+## API
+
+| Method | Path | Who |
+|---|---|---|
+| GET | `/v1/amendments?status=proposed` | members who can see both notices |
+| POST | `/v1/amendments/{id}/decision` | the same; `{"status": "confirmed" \| "rejected"}` |
+
+## Not yet
+
+- One amendment is linked to one earlier claim, the best match. A notice that
+  revises several things at once proposes one link per amendment claim, which
+  is usually right but not always.
+- Nothing re-runs matching when a *later* notice arrives that would have been a
+  better candidate for an already-decided link.
+- The model is never asked. It read the amendment; it could also be asked which
+  notice it means, with the candidates in front of it.
