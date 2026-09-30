@@ -43,6 +43,9 @@ class Principal:
     household_id: uuid.UUID
     role: str
     display_name: str
+    # Which token this request arrived on, so signing out can end that one and
+    # leave the member's other devices alone.
+    token_id: uuid.UUID | None = None
 
     @property
     def is_guardian(self) -> bool:
@@ -59,8 +62,10 @@ def inbound_address(inbound_token: str) -> str:
 
 async def _issue_token(conn: asyncpg.Connection, member_id: uuid.UUID) -> str:
     token = "fos_" + secrets.token_urlsafe(32)
-    await conn.execute("INSERT INTO member_tokens (id, member_id, token_hash) VALUES ($1, $2, $3)",
-                       uuid.uuid4(), member_id, _hash(token))
+    await conn.execute(
+        "INSERT INTO member_tokens (id, member_id, token_hash, expires_at) "
+        "VALUES ($1, $2, $3, NOW() + make_interval(days => $4))",
+        uuid.uuid4(), member_id, _hash(token), settings.token_lifetime_days)
     return token
 
 
@@ -111,15 +116,77 @@ async def authenticate(token: str, *, allow_erasing: bool = False) -> Principal 
     exception is reading the erasure's own progress (`allow_erasing`), which
     would otherwise be unreachable because erasure invalidates every token
     the moment it starts."""
+    digest = _hash(token)
     row = await pool().fetchrow(
-        "SELECT m.id, m.household_id, m.role, m.display_name FROM member_tokens t "
+        "SELECT t.id AS token_id, m.id, m.household_id, m.role, m.display_name FROM member_tokens t "
         "JOIN members m ON m.id = t.member_id JOIN households h ON h.id = m.household_id "
         "WHERE t.token_hash = $1 AND t.revoked_at IS NULL AND m.role <> 'child' "
+        "AND (t.expires_at IS NULL OR t.expires_at > NOW()) "
         "AND (h.status = 'active' OR ($2 AND h.status = 'erasing'))",
-        _hash(token), allow_erasing)
+        digest, allow_erasing)
     if row is None:
         return None
-    return Principal(member_id=row["id"], household_id=row["household_id"], role=row["role"], display_name=row["display_name"])
+    # Slide the expiry forward while the token is in use, at most once an hour
+    # so a busy session is not a write per request. A token nobody uses ends.
+    await pool().execute(
+        "UPDATE member_tokens SET last_used_at = NOW(), expires_at = NOW() + make_interval(days => $2) "
+        "WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '1 hour')",
+        row["token_id"], settings.token_lifetime_days)
+    return Principal(member_id=row["id"], household_id=row["household_id"], role=row["role"],
+                     display_name=row["display_name"], token_id=row["token_id"])
+
+
+async def sign_out(actor: Principal) -> int:
+    """End the token this request arrived on, and nothing else: signing out on
+    the shared laptop must not sign you out on your phone."""
+    if actor.token_id is None:
+        return 0
+    async with pool().acquire() as conn, conn.transaction():
+        done = await conn.execute(
+            "UPDATE member_tokens SET revoked_at = NOW(), revoked_reason = 'signed_out' "
+            "WHERE id = $1 AND revoked_at IS NULL", actor.token_id)
+        ended = 0 if done == "UPDATE 0" else 1
+        if ended:
+            await audit.record(actor.household_id, "session.signed_out", actor_member_id=actor.member_id,
+                               target_type="member", target_id=actor.member_id, conn=conn)
+    return ended
+
+
+async def revoke_all(actor: Principal, member_id: uuid.UUID) -> int:
+    """Every token a member holds, ended at once. Yourself, or -- when a phone
+    is lost and its owner cannot reach it -- anyone in the household, by a
+    guardian. Children have no tokens to end."""
+    if member_id != actor.member_id and not actor.is_guardian:
+        raise NotAllowed("only a guardian can sign another member out")
+    async with pool().acquire() as conn, conn.transaction():
+        member = await conn.fetchrow("SELECT id FROM members WHERE id = $1 AND household_id = $2",
+                                     member_id, actor.household_id)
+        if member is None:
+            raise NotFound("member")
+        rows = await conn.fetch(
+            "UPDATE member_tokens SET revoked_at = NOW(), revoked_reason = 'revoked' "
+            "WHERE member_id = $1 AND revoked_at IS NULL RETURNING id", member_id)
+        if rows:
+            await audit.record(actor.household_id, "session.revoked", actor_member_id=actor.member_id,
+                               target_type="member", target_id=member_id,
+                               detail={"tokens_ended": len(rows)}, conn=conn)
+    return len(rows)
+
+
+async def sessions(actor: Principal, member_id: uuid.UUID | None = None) -> list[dict]:
+    """The live tokens for a member: yours, or anyone's if you are a guardian.
+    The token itself is never shown again -- only when it started, when it was
+    last used, and when it ends."""
+    member_id = member_id or actor.member_id
+    if member_id != actor.member_id and not actor.is_guardian:
+        raise NotAllowed("only a guardian can see another member's sessions")
+    rows = await pool().fetch(
+        "SELECT t.id, t.member_id, t.created_at, t.last_used_at, t.expires_at "
+        "FROM member_tokens t JOIN members m ON m.id = t.member_id "
+        "WHERE t.member_id = $1 AND m.household_id = $2 AND t.revoked_at IS NULL "
+        "AND (t.expires_at IS NULL OR t.expires_at > NOW()) ORDER BY t.created_at DESC",
+        member_id, actor.household_id)
+    return [{**dict(r), "current": r["id"] == actor.token_id} for r in rows]
 
 
 async def get_household(household_id: uuid.UUID) -> dict:

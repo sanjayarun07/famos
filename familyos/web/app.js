@@ -58,7 +58,7 @@ async function api(path, options) {
   if (!res.ok) {
     let parsed = null;
     try { parsed = raw ? JSON.parse(raw) : null; } catch (e) { parsed = { detail: raw }; }
-    if (res.status === 401 && store.token) { signOut(); }
+    if (res.status === 401 && store.token) { forget(); }
     throw new ApiError(res.status, parsed);
   }
   if (opts.blob) return res.blob();
@@ -195,15 +195,24 @@ function chrome(active) {
 
 function wireChrome() {
   const btn = root.querySelector('[data-signout]');
-  if (btn) btn.addEventListener('click', signOut);
+  if (btn) btn.addEventListener('click', () => { signOut().catch(() => forget()); });
 }
 
-function signOut() {
+function forget() {
   store.token = null;
   store.me = null;
   store.household = null;
   writeToken(null);
   gateView();
+}
+
+async function signOut() {
+  // End the token on the server first. Clearing localStorage alone only
+  // forgets it in this browser: it would keep working for anyone holding it.
+  try {
+    if (store.token) await api('/signout', { method: 'POST' });
+  } catch (e) { /* already gone, or the server cannot be reached */ }
+  forget();
 }
 
 /* ── sign in ──────────────────────────────────────────────────── */
@@ -1028,7 +1037,9 @@ function amendmentCard(a) {
 /* ── household ────────────────────────────────────────────────── */
 
 async function householdView(main) {
-  const [household, consents] = await Promise.all([api('/household'), api('/consents')]);
+  const [household, consents, mySessions] = await Promise.all([
+    api('/household'), api('/consents'), api('/sessions'),
+  ]);
   store.household = household;
   const isGuardian = store.me.role === 'guardian';
   const children = (household.members || []).filter((m) => m.role === 'child');
@@ -1042,6 +1053,7 @@ async function householdView(main) {
     + '<div class="card pad stack" data-consent></div>'
     + '</div><div class="stack">'
     + inboundCard()
+    + sessionsCard(mySessions)
     + (isGuardian ? dangerCard(household) : '')
     + '</div></div>'
     + memberDialog();
@@ -1060,6 +1072,8 @@ async function householdView(main) {
         ? (c ? '<span class="tag kid">consented</span>' : '<span class="tag red">no consent</span>') : '')
       + (m.role === 'child' && isGuardian
         ? '<button class="btn danger sm" data-erase="' + esc(m.id) + '">Erase</button>' : '')
+      + (m.role !== 'child' && (isGuardian || m.id === store.me.id)
+        ? '<button class="btn ghost sm" data-signoutall="' + esc(m.id) + '">Sign out everywhere</button>' : '')
       + '</div>';
   }).join('');
 
@@ -1091,6 +1105,23 @@ async function householdView(main) {
   }
 
   wireHousehold(main, household);
+}
+
+function sessionsCard(sessions) {
+  return '<div class="card pad stack" style="gap:10px">'
+    + '<div class="row wrap" style="gap:8px"><h2>Your sign-ins</h2>'
+    + '<span class="muted">' + sessions.length + ' live</span></div>'
+    + '<p class="muted" style="line-height:1.55">A token lasts 30 days and slides forward while you use it. '
+    + 'Signing out ends the one you are on; other devices stay signed in.</p>'
+    + sessions.map((s) =>
+      '<div class="row" style="gap:10px;padding:9px 11px;background:var(--sunk);border:1px solid var(--line-soft);border-radius:7px">'
+      + '<span class="grow"><span style="font-size:12.5px;font-weight:600">'
+      + (s.current ? 'This device' : 'Another device') + '</span>'
+      + '<span class="sub">started ' + esc(ago(s.created_at))
+      + (s.last_used_at ? '  \u00B7  last used ' + esc(ago(s.last_used_at)) : '')
+      + (s.expires_at ? '  \u00B7  ends ' + esc(date(s.expires_at)) : '') + '</span></span>'
+      + (s.current ? '<span class="tag green">current</span>' : '') + '</div>').join('')
+    + '</div>';
 }
 
 function dangerCard(household) {
@@ -1175,6 +1206,19 @@ function wireHousehold(main, household) {
     } catch (err) { fail(err); }
   }));
 
+  main.querySelectorAll('[data-signoutall]').forEach((b) => b.addEventListener('click', async () => {
+    const mine = b.dataset.signoutall === store.me.id;
+    if (!confirm(mine
+      ? 'Sign out on every device, including this one?'
+      : 'End every sign-in this member has? They will need a new token to get back in.')) return;
+    try {
+      const out = await api('/members/' + b.dataset.signoutall + '/signout', { method: 'POST' });
+      flash(out.ended + ' sign-in' + (out.ended === 1 ? '' : 's') + ' ended.');
+      if (mine) { forget(); return; }
+      await render();
+    } catch (err) { fail(err); }
+  }));
+
   main.querySelectorAll('[data-erase]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('Erase this child’s data and remove them from the household? This cannot be undone.')) return;
     try {
@@ -1192,7 +1236,7 @@ function wireHousehold(main, household) {
       try {
         const e = await api('/household/erase', { method: 'POST', json: { confirm_name: typed } });
         flash('Erasure ' + e.id.slice(0, 8) + ' started. Every token is now invalid.');
-        setTimeout(signOut, 2500);
+        setTimeout(forget, 2500);
       } catch (err) { fail(err); }
     });
   }

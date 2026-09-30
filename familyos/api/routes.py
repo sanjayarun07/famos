@@ -33,6 +33,7 @@ from familyos.models import (
     ObligationDecisionIn,
     QuarantineAcceptIn,
     Reminder,
+    Session,
     Visibility,
     VisibilityIn,
 )
@@ -91,6 +92,25 @@ async def get_household(p: Principal = Depends(current_member)):
 async def add_member(body: MemberIn, p: Principal = Depends(current_member)):
     member, token = await identity.add_member(p, body)
     return Credentials(member=_member(member), token=token) if token else _member(member)
+
+
+@router.post("/signout", status_code=200, tags=["household"],
+             description="End the token this request arrived on. Other devices stay signed in.")
+async def sign_out(p: Principal = Depends(current_member)):
+    return {"ended": await identity.sign_out(p)}
+
+
+@router.get("/sessions", response_model=list[Session], tags=["household"],
+            description="Live sign-ins. Your own, or any member's if you are a guardian.")
+async def list_sessions(member_id: uuid.UUID | None = None, p: Principal = Depends(current_member)):
+    return [Session(**s) for s in await identity.sessions(p, member_id)]
+
+
+@router.post("/members/{member_id}/signout", status_code=200, tags=["household"],
+             description="End every token a member holds. Yourself, or anyone in the household if you are a "
+                         "guardian -- the answer to a lost phone.")
+async def revoke_member_sessions(member_id: uuid.UUID, p: Principal = Depends(current_member)):
+    return {"ended": await identity.revoke_all(p, member_id)}
 
 
 @router.post("/household/erase", response_model=Erasure, status_code=202, tags=["erasure"],

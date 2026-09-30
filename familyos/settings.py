@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     # Forwarding email: <household inbound token>@<inbound_domain>. The mail
     # provider posts the raw message to /v1/inbound/email with this secret.
+    # How long a sign-in token lasts. It slides forward while it is being
+    # used, so an active session stays signed in and an abandoned one ends.
+    token_lifetime_days: int = 30
+
     inbound_domain: str = "in.familyos.local"
     inbound_webhook_secret: str = Field(default="", repr=False)
     # Quarantine mail whose From address is not authenticated (DMARC, or

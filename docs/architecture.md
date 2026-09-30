@@ -88,6 +88,12 @@ filenames, subjects or text.
 - Sign-in is a bearer token issued when a member is added. Phone OTP or email
   magic link replaces `identity._issue_token` without changing anything that
   consumes a `Principal`.
+- A token lasts `FAMILYOS_TOKEN_LIFETIME_DAYS` (30) and slides forward while it
+  is used, at most once an hour, so an active session stays signed in and an
+  abandoned one ends. Signing out ends the token the request arrived on and
+  leaves the member's other devices alone; a guardian can end every token a
+  member holds, which is the answer to a lost phone. What is still missing is a
+  way to get a *new* token without a guardian adding you again.
 - Member email addresses are trusted as the guardian typed them; there is no
   verification step yet.
 - If a request fails after its sealed object was uploaded but before its row
