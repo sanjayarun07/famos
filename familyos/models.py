@@ -47,6 +47,16 @@ class Household(BaseModel):
     members: list[Member] = []
 
 
+class Session(BaseModel):
+    """A live sign-in. The token itself is never shown again."""
+    id: uuid.UUID
+    member_id: uuid.UUID
+    created_at: datetime
+    last_used_at: datetime | None
+    expires_at: datetime | None
+    current: bool
+
+
 class Credentials(BaseModel):
     """Returned once; only its hash is stored."""
     member: Member

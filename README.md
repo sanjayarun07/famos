@@ -73,6 +73,7 @@ ruff check .
 |---|---|---|
 | POST | `/v1/households` | anyone: creates a household and its first guardian |
 | GET | `/v1/me`, `/v1/household` | members |
+| GET | `/v1/sessions`; POST `/v1/signout`, `/v1/members/{id}/signout` | members; a guardian for anyone |
 | POST | `/v1/household/members` | guardians |
 | POST | `/v1/artifacts` | members: upload |
 | GET | `/v1/artifacts`, `/v1/artifacts/{id}`, `/v1/artifacts/{id}/original` | members, visibility applies |
