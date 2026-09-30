@@ -36,7 +36,7 @@ build-backend = "setuptools.build_meta"
 include = ["familyos*"]
 
 [tool.setuptools.package-data]
-familyos = ["migrations/*.sql"]
+familyos = ["migrations/*.sql", "web/*.html", "web/*.css", "web/*.js"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
