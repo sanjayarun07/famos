@@ -258,3 +258,67 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
   border: 1px solid var(--amber-line); font-family: var(--mono);
   font-size: 12px; word-break: break-all; color: var(--ink);
 }
+
+/* ── revisions ───────────────────────────────────────────────── */
+
+.count.amber { background: var(--amber-line); color: #2c1d02; }
+
+.revision {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 14px;
+}
+@media (max-width: 760px) {
+  .revision { grid-template-columns: minmax(0, 1fr); }
+  .revision .arrow { justify-self: start; }
+}
+
+.revision .side {
+  padding: 13px 15px;
+  border-radius: 9px;
+  background: var(--sunk);
+  border: 1px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.revision .side.old { background: #fbf6ea; border-color: #eadfc2; }
+
+.revision .label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.revision .ref { font-size: 14px; font-weight: 600; color: var(--ink); text-decoration: none; }
+.revision .ref:hover { color: var(--primary); text-decoration: underline; }
+.revision .change { font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+
+.revision .arrow {
+  align-self: center;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: var(--amber-tint);
+  border: 1px solid var(--amber-line);
+  color: var(--amber-ink);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* the lead-time chip on an upcoming reminder */
+.lead {
+  flex-shrink: 0;
+  min-width: 34px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--primary-tint);
+  color: var(--primary);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+}

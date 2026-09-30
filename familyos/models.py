@@ -260,6 +260,10 @@ class Obligation(BaseModel):
     decided_by: uuid.UUID | None
     decided_at: datetime | None
     created_at: datetime
+    # Set when a later notice replaced the claim this came from. The row stays,
+    # so "what happened to that?" has an answer.
+    superseded_at: datetime | None = None
+    superseded_by_artifact_id: uuid.UUID | None = None
 
 
 class ObligationDecisionIn(BaseModel):
