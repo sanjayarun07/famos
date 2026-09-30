@@ -103,18 +103,35 @@ async def _erase_subject(job: dict, ctx: jobs.JobContext) -> dict:
     if not ctx.done("0"):
         await ctx.step("0")
         async with pool().acquire() as conn, conn.transaction():
+            # Read the name before the member row can go: claims may name the
+            # child on artifacts that were never linked to them as a subject,
+            # and those artifacts are not the child's to delete.
+            named = await conn.fetchval("SELECT display_name FROM members WHERE id = $1 AND household_id = $2",
+                                        member_id, household_id)
+            blob_ids = [r["blob_id"] for r in await conn.fetch(
+                "SELECT blob_id FROM input_artifacts WHERE household_id = $1 AND (id IN "
+                "(SELECT artifact_id FROM artifact_subjects WHERE member_id = $2) OR parent_id IN "
+                "(SELECT artifact_id FROM artifact_subjects WHERE member_id = $2))", household_id, member_id)]
             deleted = await conn.fetch(
                 "DELETE FROM input_artifacts WHERE household_id = $1 AND id IN "
                 "(SELECT artifact_id FROM artifact_subjects WHERE member_id = $2) RETURNING id", household_id, member_id)
-            keys = await artifacts.drop_orphan_blobs(conn, household_id)
+            keys = await artifacts.drop_orphan_blobs(conn, household_id, blob_ids)
             # Extraction jobs for those artifacts may still hold a cached model answer.
             await conn.execute("DELETE FROM jobs WHERE household_id = $1 AND kind = 'extract_artifact' "
                                "AND spec->>'artifact_id' = ANY($2::text[])", household_id, [str(r["id"]) for r in deleted])
+            # What survives the delete above is a notice that merely mentions
+            # the child. The fact stays; their name does not.
+            cleared = [r["id"] for r in await conn.fetch(
+                "SELECT id, subject_name FROM claims WHERE household_id = $1 AND subject_name IS NOT NULL", household_id)
+                if consent.names_match(r["subject_name"], named)] if named else []
+            if cleared:
+                await conn.execute("UPDATE claims SET subject_name = NULL WHERE id = ANY($1::uuid[])", cleared)
             member_deleted = False
             if spec.get("delete_member"):
                 member_deleted = (await conn.execute("DELETE FROM members WHERE id = $1 AND household_id = $2",
                                                      member_id, household_id)) != "DELETE 0"
-        counts.update({"artifacts": len(deleted), "blobs": len(keys), "member_deleted": member_deleted})
+        counts.update({"artifacts": len(deleted), "blobs": len(keys), "member_deleted": member_deleted,
+                       "names_cleared": len(cleared)})
         await ctx.checkpoint(state={"counts": counts, "pending_keys": keys})
         await ctx.finish_step("0")
 

@@ -9,6 +9,7 @@ os.environ["FAMILYOS_BLOB_DIR"] = tempfile.mkdtemp(prefix="familyos-blobs-")
 os.environ["FAMILYOS_BLOB_BACKEND"] = "local"
 os.environ["FAMILYOS_INBOUND_WEBHOOK_SECRET"] = "test-secret"
 os.environ["FAMILYOS_INBOUND_DOMAIN"] = "in.familyos.test"
+os.environ["FAMILYOS_INBOUND_AUTHSERV_ID"] = "mx.provider.test"
 os.environ["FAMILYOS_JOBS_ENABLED"] = "false"
 
 import asyncpg  # noqa: E402

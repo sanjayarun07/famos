@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Quarantine mail whose From address is not authenticated (DMARC, or
     # DKIM/SPF aligned) by the receiving provider.
     require_sender_auth: bool = True
+    # The authserv-id our mail provider stamps on its Authentication-Results
+    # header (RFC 8601): "mx.google.com", "amazonses.com", the MX hostname.
+    # Only that provider's verdict is believed. Unset, nothing authenticates
+    # and every message waits in quarantine for a guardian.
+    inbound_authserv_id: str = ""
 
     # Durable jobs (familyos/jobs.py, from Orbit).
     jobs_enabled: bool = True

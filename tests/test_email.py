@@ -97,3 +97,40 @@ async def test_envelope_recipient_and_plus_tags_route_to_the_household(family):
     r = await post(family.client, message("amma@example.com", "list@lists.school.test", message_id="<m2@x>"),
                    recipient=f"{local}+school@{domain}")
     assert r.status_code == 202 and r.json()["status"] == "accepted"
+
+
+async def test_a_forged_verdict_is_not_believed_when_the_provider_added_none(family):
+    """Anyone can write an Authentication-Results header. Without one from
+    our own provider, a sender's own verdict must not authenticate them."""
+    r = await post(family.client, message("appa@example.com", family.inbound,
+                                          auth="evil.attacker.test; dmarc=pass header.from=example.com"))
+    assert r.json()["status"] == "quarantined"
+    queue = (await family.client.get("/v1/quarantine", headers=family.h("amma"))).json()
+    assert queue[0]["quarantine_reason"] == "sender_not_authenticated"
+
+
+async def test_mail_with_no_verdict_at_all_is_quarantined(family):
+    r = await post(family.client, message("appa@example.com", family.inbound, auth=None))
+    assert r.json()["status"] == "quarantined"
+
+
+async def test_a_parent_domains_signature_does_not_authenticate_a_subdomain(family):
+    """dkim=pass for example.com says nothing about mail.example.com; that
+    is relaxed DMARC alignment, and DMARC did not pass here."""
+    r = await family.client.post("/v1/household/members", headers=family.h("amma"),
+                                 json={"display_name": "Thatha", "role": "adult", "email": "t@mail.example.com"})
+    assert r.status_code == 201, r.text
+    r = await post(family.client, message("t@mail.example.com", family.inbound,
+                                          auth="mx.provider.test; dkim=pass header.d=example.com"))
+    assert r.json()["status"] == "quarantined"
+    # The same signature does authenticate the domain it actually names.
+    r = await post(family.client, message("appa@example.com", family.inbound, message_id="<m9@x>",
+                                          auth="mx.provider.test; dkim=pass header.d=example.com"))
+    assert r.json()["status"] == "accepted"
+
+
+async def test_only_the_configured_provider_is_believed(family, monkeypatch):
+    from familyos.settings import settings
+    monkeypatch.setattr(settings, "inbound_authserv_id", "")
+    r = await post(family.client, message("appa@example.com", family.inbound))
+    assert r.json()["status"] == "quarantined", "unset authserv-id must fail closed"

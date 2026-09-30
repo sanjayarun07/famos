@@ -282,24 +282,36 @@ async def delete_by_member(p: Principal, artifact_id: uuid.UUID) -> None:
 async def delete(household_id: uuid.UUID, artifact_id: uuid.UUID, *, actor: Principal | None = None,
                  require_status: str | None = None, action: str = "artifact.deleted") -> None:
     async with pool().acquire() as conn, conn.transaction():
+        # Attachments go with their email by cascade, so RETURNING will not
+        # name their blobs: read them before the delete.
+        blob_ids = [r["blob_id"] for r in await conn.fetch(
+            "SELECT blob_id FROM input_artifacts WHERE household_id = $1 AND (id = $2 OR parent_id = $2)",
+            household_id, artifact_id)]
         row = await conn.fetchrow(
             "DELETE FROM input_artifacts WHERE household_id = $1 AND id = $2 AND ($3::text IS NULL OR status = $3) "
             "RETURNING id", household_id, artifact_id, require_status)
         if row is None:
             raise NotFound("artifact")
-        keys = await drop_orphan_blobs(conn, household_id)
+        keys = await drop_orphan_blobs(conn, household_id, blob_ids)
         await audit.record(household_id, action, actor_kind="member" if actor else "system",
                            actor_member_id=actor.member_id if actor else None, target_type="artifact",
                            target_id=artifact_id, detail={"blobs_deleted": len(keys)}, conn=conn)
     await delete_objects(keys)
 
 
-async def drop_orphan_blobs(conn: asyncpg.Connection, household_id: uuid.UUID) -> list[str]:
+async def drop_orphan_blobs(conn: asyncpg.Connection, household_id: uuid.UUID,
+                            blob_ids: list[uuid.UUID] | None = None) -> list[str]:
     """Delete blob rows no artifact points to; returns their storage keys,
-    for the caller to delete from the object store after commit."""
+    for the caller to delete from the object store after commit.
+
+    `blob_ids` limits the check to the blobs a deletion just released, which
+    is all that can have been orphaned by it. Without it every blob of the
+    household is swept, which is what an erasure wants and what a single
+    deletion should not pay for."""
     rows = await conn.fetch(
-        "DELETE FROM blobs b WHERE b.household_id = $1 AND NOT EXISTS "
-        "(SELECT 1 FROM input_artifacts a WHERE a.blob_id = b.id) RETURNING storage_key", household_id)
+        "DELETE FROM blobs b WHERE b.household_id = $1 AND ($2::uuid[] IS NULL OR b.id = ANY($2::uuid[])) "
+        "AND NOT EXISTS (SELECT 1 FROM input_artifacts a WHERE a.blob_id = b.id) RETURNING storage_key",
+        household_id, blob_ids)
     return [r["storage_key"] for r in rows]
 
 

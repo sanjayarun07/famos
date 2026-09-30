@@ -72,6 +72,33 @@ async def list_for(household_id: uuid.UUID) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _tokens(name: str | None) -> set[str]:
+    return set((name or "").casefold().split())
+
+
+def names_match(a: str | None, b: str | None) -> bool:
+    """Whether two ways of writing a person's name refer to the same child:
+    one's words are all in the other's. A notice writes "Rahul Sharma" where
+    the household typed "Rahul", or the other way round."""
+    ta, tb = _tokens(a), _tokens(b)
+    return bool(ta) and bool(tb) and (ta <= tb or tb <= ta)
+
+
+async def consented_children(conn: asyncpg.Connection, household_id: uuid.UUID,
+                             purpose: str = HOUSEHOLD_RECORDS) -> list[tuple[uuid.UUID, str]]:
+    """(id, display_name) for every child of the household with active
+    consent. Extraction may name only these.
+
+    FOR SHARE, as in `require`: a withdrawal committing now waits for the
+    extraction that is storing claims, so its erasure then sees the name that
+    extraction recorded and clears it."""
+    rows = await conn.fetch(
+        "SELECT m.id, m.display_name FROM members m JOIN consent_records c ON c.subject_member_id = m.id "
+        "WHERE m.household_id = $1 AND m.role = 'child' AND c.purpose = $2 AND c.withdrawn_at IS NULL "
+        "FOR SHARE OF c", household_id, purpose)
+    return [(r["id"], r["display_name"]) for r in rows]
+
+
 async def require(conn: asyncpg.Connection, household_id: uuid.UUID, member_ids: list[uuid.UUID],
                   purpose: str = HOUSEHOLD_RECORDS) -> None:
     """Every named member belongs to the household, and every child among

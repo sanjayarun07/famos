@@ -106,12 +106,17 @@ async def add_member(actor: Principal, data: MemberIn) -> tuple[dict, str | None
     return dict(member), token
 
 
-async def authenticate(token: str) -> Principal | None:
+async def authenticate(token: str, *, allow_erasing: bool = False) -> Principal | None:
+    """A signed-in member. An erasing household signs nobody in; the one
+    exception is reading the erasure's own progress (`allow_erasing`), which
+    would otherwise be unreachable because erasure invalidates every token
+    the moment it starts."""
     row = await pool().fetchrow(
         "SELECT m.id, m.household_id, m.role, m.display_name FROM member_tokens t "
         "JOIN members m ON m.id = t.member_id JOIN households h ON h.id = m.household_id "
-        "WHERE t.token_hash = $1 AND t.revoked_at IS NULL AND h.status = 'active' AND m.role <> 'child'",
-        _hash(token))
+        "WHERE t.token_hash = $1 AND t.revoked_at IS NULL AND m.role <> 'child' "
+        "AND (h.status = 'active' OR ($2 AND h.status = 'erasing'))",
+        _hash(token), allow_erasing)
     if row is None:
         return None
     return Principal(member_id=row["id"], household_id=row["household_id"], role=row["role"], display_name=row["display_name"])

@@ -73,3 +73,35 @@ async def test_nothing_new_is_accepted_while_erasing(family, database):
         with pytest.raises(artifacts.HouseholdUnavailable):
             await artifacts.create(conn, family.household["id"], artifacts.NewArtifact(
                 data=b"x", media_type="text/plain", channel="upload", visibility="private", status="accepted"))
+
+
+async def test_a_guardian_can_watch_the_household_erasure_they_asked_for(family, database):
+    """Erasure invalidates every token at once, so the progress endpoint has
+    to keep answering or it could never be read at all."""
+    r = await family.client.post("/v1/household/erase", headers=family.h("amma"),
+                                 json={"confirm_name": "The Arun family"})
+    assert r.status_code == 202, r.text
+    erasure_id = r.json()["id"]
+    # Everything else the household could do is closed.
+    assert (await family.client.get("/v1/artifacts", headers=family.h("amma"))).status_code == 401
+    assert (await family.client.get("/v1/household", headers=family.h("amma"))).status_code == 401
+    # The erasure's own progress is not.
+    poll = await family.client.get(f"/v1/erasures/{erasure_id}", headers=family.h("amma"))
+    assert poll.status_code == 200, poll.text
+    assert poll.json()["scope"] == "household" and poll.json()["completed_at"] is None
+    await _run(database, erasure_id)
+    assert await database.fetchval("SELECT completed_at IS NOT NULL FROM erasure_log WHERE id = $1", erasure_id)
+
+
+async def test_deleting_an_artifact_keeps_a_blob_another_artifact_still_uses(family, database):
+    """The orphan sweep looks only at the blobs a deletion released, so it
+    must still spare one that another member's artifact points to."""
+    same = pdf("shared bytes")
+    a = (await family.upload("amma", same)).json()["artifact"]
+    b = (await family.upload("appa", same)).json()["artifact"]
+    assert a["id"] != b["id"] and a["sha256"] == b["sha256"]
+    assert await database.fetchval("SELECT count(*) FROM blobs") == 1      # stored once
+    assert (await family.client.delete(f"/v1/artifacts/{a['id']}", headers=family.h("amma"))).status_code == 204
+    assert await database.fetchval("SELECT count(*) FROM blobs") == 1      # appa still has it
+    assert (await family.client.delete(f"/v1/artifacts/{b['id']}", headers=family.h("appa"))).status_code == 204
+    assert await database.fetchval("SELECT count(*) FROM blobs") == 0      # now nobody does
