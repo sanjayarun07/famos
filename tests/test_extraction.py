@@ -197,14 +197,42 @@ async def test_openai_answers_are_grounded_the_same_way():
 
 def test_the_extractor_follows_the_configured_model_and_key(monkeypatch):
     monkeypatch.setattr(settings, "extraction_model", "openai/gpt-5.6-sol")
-    monkeypatch.setattr(settings, "openai_api_key", "")
-    assert pipeline.make_extractor("auto").name == "rules"
     monkeypatch.setattr(settings, "openai_api_key", "sk-test")
-    chosen = pipeline.make_extractor("auto")
+    chosen = pipeline.make_extractor("model")
     assert chosen.name == "openai" and chosen.model == "openai/gpt-5.6-sol"
     monkeypatch.setattr(settings, "extraction_model", "anthropic/claude-opus-5-5")
-    assert pipeline.make_extractor("auto").name == "rules"      # no Anthropic key
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant")
     assert pipeline.make_extractor("model").name == "claude"
+
+
+def test_an_api_key_alone_does_not_start_sending_notices_out(monkeypatch):
+    """The whole point: a key in the environment is not consent to ship a
+    household’s notices to a third party. Only naming the extractor is."""
+    monkeypatch.setattr(settings, "extraction_model", "openai/gpt-5.6-sol")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "extractor", "rules")
+    assert pipeline.make_extractor().name == "rules"
+    assert "stays in this deployment" in pipeline.describe()
+
+    monkeypatch.setattr(settings, "extractor", "model")
+    assert pipeline.make_extractor().name == "openai"
+    assert "is sent to this provider" in pipeline.describe()
+
+
+def test_asking_for_a_model_without_its_key_is_an_error_not_a_quiet_fallback(monkeypatch):
+    monkeypatch.setattr(settings, "extraction_model", "openai/gpt-5.6-sol")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(settings, "extractor", "model")
+    with pytest.raises(ValueError, match="no openai API key"):
+        pipeline.make_extractor()
+    assert "MISCONFIGURED" in pipeline.describe()
+
+
+def test_an_unknown_extractor_name_is_refused(monkeypatch):
+    with pytest.raises(ValueError, match="must be one of"):
+        pipeline.make_extractor("auto")          # the mode that used to decide for you
+    with pytest.raises(ValueError, match="must be one of"):
+        pipeline.make_extractor("banana")
 
 
 def test_openai_key_is_read_from_its_usual_name(monkeypatch):

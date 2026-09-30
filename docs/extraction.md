@@ -49,12 +49,35 @@ its box: PDF points from the top left, or image pixels.
   as `PROMPT_VERSION`; change it whenever the prompt or schema changes.
 - **rules** (`rules.py`): regular expressions over lines with dates and
   amounts, no network. The baseline the model is scored against, and the
-  fallback when no API key is configured.
+  default.
 
-`FAMILYOS_EXTRACTOR=auto` (the default) uses the model named by
-`FAMILYOS_EXTRACTION_MODEL` (or `RESEARCH_MODEL`) when its provider's key is set
-(`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, or the same with a `FAMILYOS_`
-prefix), and the rules otherwise.
+### Choosing one, on purpose
+
+`FAMILYOS_EXTRACTOR` is `rules` (the default), `model`, `claude` or `openai`.
+There is no mode that decides for you.
+
+| | |
+|---|---|
+| `rules` | notices are read here; their text never leaves this deployment |
+| `model` / `claude` / `openai` | **the full text of every accepted notice, names included, is sent to that provider** |
+
+Sending a household's notices to a third party is a choice somebody makes, so
+it is named in the configuration. An API key sitting in the environment does
+**not** turn it on -- earlier it did, which meant a key set for something else
+silently started shipping children's notices offsite.
+
+Asking for a model with no key for its provider is a configuration error and
+says so at startup, rather than quietly reading the notice some other way. Every
+boot logs which extractor is in use and, for a model, that notice text leaves
+the deployment. Each `extraction.completed` audit event records the extractor
+and model that produced it.
+
+The key itself is read from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, or the
+same with a `FAMILYOS_` prefix; the model from `FAMILYOS_EXTRACTION_MODEL` or
+`RESEARCH_MODEL`.
+
+> Whether model extraction needs its own recorded consent, separate from
+> `household_records`, is an open question. Today it does not have one.
 
 ### Claims
 

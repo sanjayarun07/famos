@@ -15,6 +15,7 @@ from familyos import db, erasure, jobs, reminders
 from familyos.api.routes import router
 from familyos.artifacts import HouseholdUnavailable
 from familyos.consent import ConsentRequired
+from familyos.extraction import pipeline as extraction_pipeline
 from familyos.extraction import service as extraction
 from familyos.identity import Invalid, NotAllowed, NotFound
 from familyos.intake.gateway import Rejected
@@ -36,6 +37,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await db.connect()
     await db.migrate()
     register_job_handlers()
+    # Say out loud, every boot, what reads notices and where their text goes.
+    # basicConfig is a no-op once the host has configured logging; without it
+    # uvicorn leaves the root logger bare and this line goes nowhere.
+    logging.basicConfig(level=logging.INFO)
+    said = extraction_pipeline.describe()
+    logger.error("%s", said) if "MISCONFIGURED" in said else logger.info("%s", said)
     if settings.jobs_enabled:
         await reminders.ensure_scheduled()
     worker = asyncio.create_task(jobs.worker()) if settings.jobs_enabled else None
