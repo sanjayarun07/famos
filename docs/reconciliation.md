@@ -76,6 +76,34 @@ replaced it, rather than quietly disappearing.
 | GET | `/v1/amendments?status=proposed` | members who can see both notices |
 | POST | `/v1/amendments/{id}/decision` | the same; `{"status": "confirmed" \| "rejected"}` |
 
+## The same notice twice
+
+A parents' group makes this the normal case: three people relay one circular
+and the family is told three times about one consent form.
+
+Storage has always deduplicated the **bytes** -- one blob however many members
+send it -- but each artifact proposed its own obligations. Now, when the very
+same bytes have already arrived, the later copy's obligations are superseded by
+the first and their pending reminders cancelled.
+
+This one needs nobody's confirmation, unlike an amendment. Matching two notices
+by their words is a guess; matching them by SHA-256 is not. Both artifacts stay:
+two parents did send it, and who told you is worth keeping.
+
+Still a guess, and so still unsolved: the same notice **re-photographed** or
+re-encoded by someone else. Different bytes, same circular. That needs the
+claim-similarity matcher above pointed at "these are the same notice" rather
+than "this one amends that one".
+
+## Heard, not issued
+
+A message a parent forwarded from their own group is second-hand. It is usually
+the fastest way a family hears anything -- and it is still somebody's retelling,
+so a claim read out of it carries `HEARSAY_PENALTY` (0.8) on its confidence, the
+same shape as `pipeline.UNGROUNDED_PENALTY`. Kept and shown, trusted less.
+
+It still becomes a task. Held less confidently is not the same as ignored.
+
 ## Not yet
 
 - One amendment is linked to one earlier claim, the best match. A notice that
