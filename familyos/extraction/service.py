@@ -33,6 +33,10 @@ from familyos.settings import settings
 KIND = "extract_artifact"
 HANDLER_VERSION = "1"
 
+# What a claim is worth when it was relayed rather than issued. The same shape
+# as pipeline.UNGROUNDED_PENALTY: kept and shown, trusted less.
+HEARSAY_PENALTY = 0.8
+
 
 async def enqueue(conn: asyncpg.Connection, household_id: uuid.UUID, artifact_ids: list[uuid.UUID], *,
                   member_id: uuid.UUID | None = None) -> list[dict]:
@@ -111,8 +115,8 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
     previous extraction and replace its still-proposed obligations."""
     proposed = propose(extraction.claims, extraction.reference_date)
     async with pool().acquire() as conn, conn.transaction():
-        artifact = await conn.fetchrow("SELECT id, parent_id FROM input_artifacts WHERE id = $1 AND household_id = $2 "
-                                       "FOR KEY SHARE", artifact_id, household_id)
+        artifact = await conn.fetchrow("SELECT id, parent_id, source FROM input_artifacts WHERE id = $1 "
+                                       "AND household_id = $2 FOR KEY SHARE", artifact_id, household_id)
         if artifact is None:
             return {"skipped": "artifact deleted"}
         subjects = await conn.fetch("SELECT DISTINCT member_id FROM artifact_subjects WHERE artifact_id = $1 OR artifact_id = $2",
@@ -122,6 +126,11 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
         # the same rule artifact_subjects enforces. An extractor that reads a
         # name off the notice does not get to record it otherwise, and a name
         # matching nobody is dropped rather than kept on the chance it is safe.
+        # A message a parent forwarded from their own group is second-hand.
+        # It is usually the fastest way a family hears anything -- and it is
+        # still somebody’s retelling, so it is not worth as much as the
+        # school’s own circular saying the same thing.
+        hearsay = bool((artifact["source"] or {}).get("forwarded"))
         allowed = await consent.consented_children(conn, household_id)
         named = [c.subject_name for c in extraction.claims if c.subject_name]
         dropped = sum(1 for n in named if not any(consent.names_match(n, d) for _, d in allowed))
@@ -150,7 +159,8 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
               c.amount.text if c.amount else None, c.applies_to, _permitted_name(c.subject_name, allowed),
               list(c.requires), c.optional, c.uncertain,
               c.amends, c.change, c.quote, c.page, (c.location or {}).get("start"), (c.location or {}).get("end"),
-              (c.location or {}).get("boxes"), (c.location or {}).get("match"), c.confidence)
+              (c.location or {}).get("boxes"), (c.location or {}).get("match"),
+              round(c.confidence * (HEARSAY_PENALTY if hearsay else 1.0), 3))
              for i, c in enumerate(extraction.claims)])
         rows = [(uuid.uuid4(), household_id, artifact_id, claim_ids[o.claim_index], subject, o.kind, o.action, o.title,
                  o.due_date, o.end_date, o.due_time, o.optional)
@@ -158,12 +168,16 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
         await conn.executemany(
             "INSERT INTO obligations (id, household_id, artifact_id, claim_id, subject_member_id, kind, action, title, due_date, "
             "end_date, due_time, optional) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)", rows)
-        # Now the claims exist, see whether any of them revises an earlier notice.
+        # Now the claims exist, see whether any of them revises an earlier
+        # notice, and whether this is simply the same notice arriving again.
         amendments = await reconcile.propose(conn, household_id, artifact_id)
+        merged = await reconcile.merge_exact_duplicate(conn, household_id, artifact_id)
         counts = {"amendments_proposed": amendments, "extraction_id": str(extraction_id), "claims": len(claim_ids),
                   "grounded": sum(1 for c in extraction.claims if c.grounded), "obligations": len(rows),
                   "actionable": extraction.actionable, "extractor": x.name, "model": x.model,
-                  "prompt_version": x.prompt_version, "names_dropped": dropped}
+                  "prompt_version": x.prompt_version, "names_dropped": dropped, "hearsay": hearsay,
+                  "duplicate_of": (merged or {}).get("first_artifact_id"),
+                  "obligations_superseded": (merged or {}).get("obligations_superseded", 0)}
         await audit.record(household_id, "extraction.completed", actor_kind="system", target_type="artifact",
                            target_id=artifact_id, detail=counts, conn=conn)
     return counts
