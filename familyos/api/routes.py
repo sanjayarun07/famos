@@ -7,12 +7,14 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile, status
 
-from familyos import artifacts, audit, consent, erasure, identity
+from familyos import artifacts, audit, consent, erasure, identity, reconcile, reminders
 from familyos.api.deps import current_member
 from familyos.extraction import service as extraction
 from familyos.identity import Principal
 from familyos.intake import gateway
 from familyos.models import (
+    Amendment,
+    AmendmentDecisionIn,
     Artifact,
     ArtifactExtraction,
     AuditEvent,
@@ -30,6 +32,7 @@ from familyos.models import (
     Obligation,
     ObligationDecisionIn,
     QuarantineAcceptIn,
+    Reminder,
     Visibility,
     VisibilityIn,
 )
@@ -173,6 +176,30 @@ async def get_extraction(artifact_id: uuid.UUID, p: Principal = Depends(current_
 async def rerun_extraction(artifact_id: uuid.UUID, p: Principal = Depends(current_member)):
     """Read the artifact again, e.g. after the extractor improved."""
     return await extraction.rerun(p, artifact_id)
+
+
+@router.get("/amendments", response_model=list[Amendment], tags=["extraction"],
+            description="Notices that look like they revise an earlier one. Listed only to members who can see "
+                        "both notices. `status=` (empty) lists all.")
+async def list_amendments(status: str | None = "proposed", limit: int = 100, p: Principal = Depends(current_member)):
+    return [Amendment(**r) for r in await reconcile.list_for(p, status or None, min(max(limit, 1), 200))]
+
+
+@router.post("/amendments/{amendment_id}/decision", tags=["extraction"],
+             description="Confirm and the earlier notice's obligations are superseded and stop reminding; "
+                         "reject and both stand.")
+async def decide_amendment(amendment_id: uuid.UUID, body: AmendmentDecisionIn,
+                           p: Principal = Depends(current_member)):
+    row = await reconcile.decide(p, amendment_id, body.status)
+    return {"id": str(amendment_id), "status": row["status"],
+            "obligations_superseded": row["obligations_superseded"]}
+
+
+@router.get("/reminders", response_model=list[Reminder], tags=["extraction"],
+            description="What this member will be told about, and was. A reminder exists only for an obligation "
+                        "the member can see, so a private notice reminds nobody else.")
+async def list_reminders(limit: int = 100, p: Principal = Depends(current_member)):
+    return [Reminder(**r) for r in await reminders.list_for(p, min(max(limit, 1), 500))]
 
 
 @router.get("/obligations", response_model=list[Obligation], tags=["extraction"])
