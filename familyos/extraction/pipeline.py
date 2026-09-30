@@ -21,11 +21,25 @@ UNGROUNDED_PENALTY = 0.5
 TASK_KINDS = {"deadline", "form", "payment"}
 
 
+EXTRACTORS = ("rules", "model", "claude", "anthropic", "openai")
+
+
 def make_extractor(name: str | None = None):
-    """`rules`, `model` (the provider of FAMILYOS_EXTRACTION_MODEL), or `auto`:
-    the model when its provider's API key is set, the rules otherwise.
-    `claude` and `openai` pick that provider with its default model."""
+    """`rules` reads notices here and sends nothing anywhere. `model` uses the
+    provider of FAMILYOS_EXTRACTION_MODEL; `claude` and `openai` pick that
+    provider with its default model.
+
+    There is deliberately no mode that decides for you. Sending a household's
+    notices to a model provider is a choice somebody makes, so it is named in
+    the configuration and never inferred from an API key happening to be in the
+    environment. A model asked for without its key is a configuration error and
+    says so, rather than quietly reading the notice some other way."""
     name = name or settings.extractor
+    if name not in EXTRACTORS:
+        raise ValueError(f"FAMILYOS_EXTRACTOR must be one of {', '.join(EXTRACTORS)}, not {name!r}")
+    if name == "rules":
+        return RulesExtractor()
+
     model = settings.extraction_model
     if name in ("claude", "anthropic") and split_model(model)[0] != "anthropic":
         model = "anthropic/claude-opus-5-5"
@@ -33,15 +47,29 @@ def make_extractor(name: str | None = None):
         model = "openai/gpt-5.6-sol"
     provider = split_model(model)[0]
     keys = {"anthropic": settings.anthropic_api_key, "openai": settings.openai_api_key}
-    if name == "auto":
-        name = "model" if keys.get(provider) else "rules"
-    if name == "rules":
-        return RulesExtractor()
+    if provider not in keys:
+        raise ValueError(f"unknown model provider {provider!r} in {model!r}")
+    if not keys[provider]:
+        raise ValueError(
+            f"FAMILYOS_EXTRACTOR={name} asks for {model}, but no {provider} API key is set. "
+            f"Set it, or use FAMILYOS_EXTRACTOR=rules to read notices without sending them anywhere.")
     if provider == "anthropic":
-        return ClaudeExtractor(api_key=keys["anthropic"] or None, model=model, effort=settings.extraction_effort)
-    if provider == "openai":
-        return OpenAIExtractor(api_key=keys["openai"] or None, model=model, effort=settings.extraction_effort)
-    raise ValueError(f"unknown model provider {provider!r} in {model!r}")
+        return ClaudeExtractor(api_key=keys["anthropic"], model=model, effort=settings.extraction_effort)
+    return OpenAIExtractor(api_key=keys["openai"], model=model, effort=settings.extraction_effort)
+
+
+def describe() -> str:
+    """One line for the log at startup: what reads notices, and where their
+    text goes."""
+    name = settings.extractor
+    if name == "rules":
+        return "extraction: rules (offline) - notice text stays in this deployment"
+    try:
+        extractor = make_extractor()
+    except ValueError as exc:
+        return f"extraction: MISCONFIGURED - {exc}"
+    return (f"extraction: {extractor.name} model {extractor.model} - the full text of every accepted notice, "
+            f"names included, is sent to this provider")
 
 
 def info(extractor, doc: ParsedDocument, model: str | None = None) -> ExtractorInfo:
