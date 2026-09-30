@@ -20,7 +20,7 @@ import uuid
 
 import asyncpg
 
-from familyos import artifacts, audit, consent, jobs
+from familyos import artifacts, audit, consent, jobs, reconcile
 from familyos.db import pool
 from familyos.extraction import pipeline
 from familyos.extraction.claims import Extraction
@@ -158,7 +158,9 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
         await conn.executemany(
             "INSERT INTO obligations (id, household_id, artifact_id, claim_id, subject_member_id, kind, action, title, due_date, "
             "end_date, due_time, optional) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)", rows)
-        counts = {"extraction_id": str(extraction_id), "claims": len(claim_ids),
+        # Now the claims exist, see whether any of them revises an earlier notice.
+        amendments = await reconcile.propose(conn, household_id, artifact_id)
+        counts = {"amendments_proposed": amendments, "extraction_id": str(extraction_id), "claims": len(claim_ids),
                   "grounded": sum(1 for c in extraction.claims if c.grounded), "obligations": len(rows),
                   "actionable": extraction.actionable, "extractor": x.name, "model": x.model,
                   "prompt_version": x.prompt_version, "names_dropped": dropped}

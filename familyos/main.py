@@ -5,11 +5,13 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
-from familyos import db, erasure, jobs
+from familyos import db, erasure, jobs, reminders
 from familyos.api.routes import router
 from familyos.artifacts import HouseholdUnavailable
 from familyos.consent import ConsentRequired
@@ -20,10 +22,13 @@ from familyos.settings import settings
 
 logger = logging.getLogger("familyos")
 
+WEB = Path(__file__).parent / "web"
+
 
 def register_job_handlers() -> None:
     erasure.register()
     extraction.register()
+    reminders.register()
 
 
 @contextlib.asynccontextmanager
@@ -31,6 +36,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await db.connect()
     await db.migrate()
     register_job_handlers()
+    if settings.jobs_enabled:
+        await reminders.ensure_scheduled()
     worker = asyncio.create_task(jobs.worker()) if settings.jobs_enabled else None
     try:
         yield
@@ -50,6 +57,15 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     async def healthz():
         await db.pool().fetchval("SELECT 1")
         return {"ok": True}
+
+    # The console is served from this app, so it shares the API's origin: the
+    # bearer token goes straight on each request and no CORS rule is needed.
+    if WEB.is_dir():
+        @app.get("/", include_in_schema=False)
+        async def root():
+            return RedirectResponse("/app/")
+
+        app.mount("/app", StaticFiles(directory=WEB, html=True), name="console")
 
     def _error(status: int, code: str, message: str, **extra) -> JSONResponse:
         return JSONResponse(status_code=status, content={"error": code, "detail": message, **extra})

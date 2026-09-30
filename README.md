@@ -21,7 +21,9 @@ calendar entries for a member to accept or dismiss. See
 [docs/extraction.md](docs/extraction.md), including how to score it against
 the test set.
 
-See [docs/architecture.md](docs/architecture.md) for how it fits together and
+See [docs/architecture.md](docs/architecture.md) for how it fits together,
+[docs/reminders.md](docs/reminders.md) for how the family gets told,
+[docs/reconciliation.md](docs/reconciliation.md) for revised notices, and
 [docs/provenance.md](docs/provenance.md) for code taken from Orbit.
 
 ## Run it
@@ -34,7 +36,11 @@ pip install -e ".[dev]"
 uvicorn familyos.main:app --reload   # applies migrations on start
 ```
 
-API docs are at http://localhost:8000/docs.
+The console is at http://localhost:8000/app/ and the API docs at
+http://localhost:8000/docs. The console is served by the API itself, so a
+request is same-origin and the member's bearer token goes straight on it: no
+CORS rule and no second host to run. Sign in by pasting a token, or create a
+household from the front page.
 
 ```sh
 # Create a household; keep the token it returns.
@@ -78,6 +84,8 @@ ruff check .
 | POST, GET | `/v1/consents`; POST `/v1/consents/{id}/withdraw` | guardians |
 | POST | `/v1/members/{id}/erase`, `/v1/household/erase` | guardians |
 | GET | `/v1/erasures/{id}` | members |
+| GET | `/v1/amendments`; POST `/v1/amendments/{id}/decision` | members who can see both notices |
+| GET | `/v1/reminders` | members: what they will be told about, and were |
 | GET | `/v1/audit` | guardians |
 | GET | `/v1/artifacts/{id}/extraction`; POST `/v1/artifacts/{id}/extract` | members, visibility applies |
 | GET | `/v1/obligations`; POST `/v1/obligations/{id}/decision` | members, visibility applies |
