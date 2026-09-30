@@ -205,6 +205,30 @@ class ArtifactExtraction(BaseModel):
     job_error: str | None
 
 
+class Amendment(BaseModel):
+    """A proposed link: this notice revises that earlier one. Proposed until a
+    member confirms it, because a wrong link would stop a live reminder."""
+    id: uuid.UUID
+    artifact_id: uuid.UUID
+    claim_id: uuid.UUID
+    claim_title: str
+    change: str | None
+    amends_artifact_id: uuid.UUID
+    amends_claim_id: uuid.UUID
+    amends_title: str
+    amends_date: date | None
+    score: float
+    matched_on: str
+    status: Literal["proposed", "confirmed", "rejected"]
+    decided_by: uuid.UUID | None
+    decided_at: datetime | None
+    created_at: datetime
+
+
+class AmendmentDecisionIn(BaseModel):
+    status: Literal["confirmed", "rejected"]
+
+
 class Reminder(BaseModel):
     id: uuid.UUID
     obligation_id: uuid.UUID

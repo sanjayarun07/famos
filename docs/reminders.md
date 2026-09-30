@@ -77,11 +77,16 @@ Subject: Return the trip consent form needs signing
 |---|---|---|
 | GET | `/v1/reminders` | members: what they will be told, and were |
 
+## Reconciliation
+
+A notice that revises an earlier one links to it (`familyos/reconcile.py`),
+and confirming that link supersedes the older obligations so they stop
+reminding. A reminder for an obligation with an **unconfirmed** link still goes
+out, and says a later notice may have changed it: being reminded about
+something already settled is a nuisance, not being reminded about something
+that still stands is the harm.
+
 ## Not yet
 
 - Quiet hours, and one digest instead of several separate reminders.
 - A member choosing their own lead times, or opting out.
-- Reconciliation: when a notice amends an earlier one, the obligations from the
-  notice it replaces should be superseded rather than both reminding.
-  `claims.amends` is still free text with nothing linking it to the artifact it
-  amends.
