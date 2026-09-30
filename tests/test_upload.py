@@ -73,3 +73,26 @@ async def test_deleting_an_artifact_removes_an_unshared_blob(family, database):
     assert (await family.client.delete(f"/v1/artifacts/{artifact['id']}", headers=family.h("amma"))).status_code == 204
     assert await database.fetchval("SELECT count(*) FROM blobs") == 0
     assert not (Path(settings.blob_dir) / key).exists()
+
+
+async def test_a_pasted_message_is_a_notice_like_any_other(family, database):
+    """Until a WhatsApp business number is live, copying the message and
+    pasting it is the way in. The console sends it as a text file, so it takes
+    the same path as every other upload: same bytes, same hash, same dedup."""
+    text = ("Dear Parents\n\nAnnual Day is on Friday, 14 November 2026 at 5:00 p.m.\n"
+            "Kindly confirm attendance by 7 November 2026.\n")
+    r = await family.client.post("/v1/artifacts", headers=family.h("amma"),
+                                 files={"file": ("pasted 2026-09-30 18:40.txt", text.encode(), "text/plain")},
+                                 data={"visibility": "shared"})
+    assert r.status_code == 201, r.text
+    artifact = r.json()["artifact"]
+    assert artifact["media_type"] == "text/plain"
+    assert artifact["filename"] == "pasted 2026-09-30 18:40.txt"
+
+    # Two parents pasting the same message store the bytes once.
+    again = await family.client.post("/v1/artifacts", headers=family.h("appa"),
+                                     files={"file": ("pasted again.txt", text.encode(), "text/plain")},
+                                     data={"visibility": "shared"})
+    assert again.status_code == 201
+    assert await database.fetchval("SELECT count(*) FROM blobs") == 1
+    assert await database.fetchval("SELECT count(*) FROM input_artifacts") == 2

@@ -322,3 +322,10 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
   font-weight: 700;
   text-align: center;
 }
+
+/* the paste box on Add a notice */
+textarea[name="text"] {
+  min-height: 132px;
+  resize: vertical;
+  font: 400 13px/1.55 var(--sans);
+}
