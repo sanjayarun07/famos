@@ -34,7 +34,11 @@ pip install -e ".[dev]"
 uvicorn familyos.main:app --reload   # applies migrations on start
 ```
 
-API docs are at http://localhost:8000/docs.
+The console is at http://localhost:8000/app/ and the API docs at
+http://localhost:8000/docs. The console is served by the API itself, so a
+request is same-origin and the member's bearer token goes straight on it: no
+CORS rule and no second host to run. Sign in by pasting a token, or create a
+household from the front page.
 
 ```sh
 # Create a household; keep the token it returns.
