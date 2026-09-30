@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile, status
 
-from familyos import artifacts, audit, consent, erasure, identity
+from familyos import artifacts, audit, consent, erasure, identity, reminders
 from familyos.api.deps import current_member
 from familyos.extraction import service as extraction
 from familyos.identity import Principal
@@ -30,6 +30,7 @@ from familyos.models import (
     Obligation,
     ObligationDecisionIn,
     QuarantineAcceptIn,
+    Reminder,
     Visibility,
     VisibilityIn,
 )
@@ -173,6 +174,13 @@ async def get_extraction(artifact_id: uuid.UUID, p: Principal = Depends(current_
 async def rerun_extraction(artifact_id: uuid.UUID, p: Principal = Depends(current_member)):
     """Read the artifact again, e.g. after the extractor improved."""
     return await extraction.rerun(p, artifact_id)
+
+
+@router.get("/reminders", response_model=list[Reminder], tags=["extraction"],
+            description="What this member will be told about, and was. A reminder exists only for an obligation "
+                        "the member can see, so a private notice reminds nobody else.")
+async def list_reminders(limit: int = 100, p: Principal = Depends(current_member)):
+    return [Reminder(**r) for r in await reminders.list_for(p, min(max(limit, 1), 500))]
 
 
 @router.get("/obligations", response_model=list[Obligation], tags=["extraction"])

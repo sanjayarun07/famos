@@ -205,6 +205,21 @@ class ArtifactExtraction(BaseModel):
     job_error: str | None
 
 
+class Reminder(BaseModel):
+    id: uuid.UUID
+    obligation_id: uuid.UUID
+    reason: Literal["due", "undecided"]
+    lead_days: int
+    send_after: datetime
+    channel: str
+    status: Literal["pending", "sent", "failed", "cancelled"]
+    sent_at: datetime | None
+    title: str
+    action: str
+    due_date: date | None
+    subject_member_id: uuid.UUID | None
+
+
 class Obligation(BaseModel):
     id: uuid.UUID
     artifact_id: uuid.UUID

@@ -55,5 +55,22 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", repr=False,
                                 validation_alias=AliasChoices("FAMILYOS_OPENAI_API_KEY", "OPENAI_API_KEY"))
 
+    # Reminders (familyos/reminders.py). One recurring job tells whoever may
+    # see an obligation, before its date. Lead times are days before, as a
+    # comma-separated list; 0 means on the day.
+    reminders_enabled: bool = True
+    reminder_lead_days: str = "7,1,0"
+    reminder_sweep_seconds: float = 3600.0
+    reminder_max_attempts: int = 5
+    # "log" writes the reminder to the application log and the audit trail and
+    # is the default because it needs nothing configured. "email" needs SMTP.
+    reminder_channel: str = "log"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_starttls: bool = True
+    smtp_username: str = ""
+    smtp_password: str = Field(default="", repr=False)
+    smtp_from: str = ""
+
 
 settings = Settings()

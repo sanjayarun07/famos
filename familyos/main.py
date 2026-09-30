@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from familyos import db, erasure, jobs
+from familyos import db, erasure, jobs, reminders
 from familyos.api.routes import router
 from familyos.artifacts import HouseholdUnavailable
 from familyos.consent import ConsentRequired
@@ -24,6 +24,7 @@ logger = logging.getLogger("familyos")
 def register_job_handlers() -> None:
     erasure.register()
     extraction.register()
+    reminders.register()
 
 
 @contextlib.asynccontextmanager
@@ -31,6 +32,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await db.connect()
     await db.migrate()
     register_job_handlers()
+    if settings.jobs_enabled:
+        await reminders.ensure_scheduled()
     worker = asyncio.create_task(jobs.worker()) if settings.jobs_enabled else None
     try:
         yield
