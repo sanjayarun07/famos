@@ -47,11 +47,13 @@ class Settings(BaseSettings):
     job_max_attempts: int = 5
     job_attach_seconds: float = 20.0
 
-    # Extraction (familyos/extraction). "auto" uses the model when its
-    # provider's API key is set and the offline rule-based extractor otherwise.
+    # Extraction (familyos/extraction). "rules" reads notices in this
+    # deployment and sends nothing anywhere. "model" sends the full text of
+    # every accepted notice to the provider of extraction_model, so it is named
+    # here and never inferred from an API key being present.
     # The model is named provider/model, LiteLLM-style.
     extraction_enabled: bool = True
-    extractor: str = "auto"                 # auto | model | rules (claude, openai pick a provider)
+    extractor: str = "rules"                # rules | model | claude | openai
     extraction_model: str = Field(default="openai/gpt-5.6-sol",
                                   validation_alias=AliasChoices("FAMILYOS_EXTRACTION_MODEL", "RESEARCH_MODEL"))
     extraction_effort: str = "medium"
