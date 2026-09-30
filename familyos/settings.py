@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = Field(default="", repr=False)
     whatsapp_access_token: str = Field(default="", repr=False)
     whatsapp_phone_number_id: str = ""
+    # The number as a parent would save it. Meta's phone_number_id is an
+    # internal handle and no use to anyone forwarding a message.
+    whatsapp_business_number: str = ""
     whatsapp_api_base: str = "https://graph.facebook.com/v21.0"
 
     # Quarantine mail whose From address is not authenticated (DMARC, or

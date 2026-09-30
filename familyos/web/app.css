@@ -329,3 +329,47 @@ textarea[name="text"] {
   resize: vertical;
   font: 400 13px/1.55 var(--sans);
 }
+
+/* ── ways in ─────────────────────────────────────────────────── */
+
+.ways {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.way {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 13px 14px;
+  border-radius: 9px;
+  background: var(--sunk);
+  border: 1px solid var(--line-soft);
+}
+.way.off { opacity: 0.66; }
+.way .sub { display: block; font-size: 12px; color: var(--ink-3); margin-top: 4px; line-height: 1.45; }
+
+.addr {
+  flex-grow: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+.recipe {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #f2eee2;
+  font: 400 11.5px/1.7 var(--mono);
+  overflow-x: auto;
+  white-space: pre;
+}

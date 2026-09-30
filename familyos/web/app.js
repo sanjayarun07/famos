@@ -335,25 +335,121 @@ async function noticesView(main) {
   const dlg = main.querySelector('dialog');
   main.querySelector('[data-add]').addEventListener('click', () => dlg.showModal());
   wireUpload(dlg);
-  const copy = main.querySelector('[data-copy]');
-  if (copy) {
-    copy.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(store.household.inbound_address);
-        flash('Forwarding address copied.');
-      } catch (e) { flash('Could not reach the clipboard.', true); }
-    });
-  }
+  wireWays(main, dlg);
+}
+
+function wireWays(main, dlg) {
+  main.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(b.dataset.copy);
+      flash('Copied.');
+    } catch (e) { flash('Could not reach the clipboard.', true); }
+  }));
+  const add = main.querySelector('[data-add]');
+  if (add && dlg) add.addEventListener('click', () => dlg.showModal());
+  const how = main.querySelector('[data-shortcut]');
+  if (how) how.addEventListener('click', () => shortcutHelp(main));
+}
+
+function shortcutHelp(main) {
+  const existing = main.querySelector('dialog[data-help]');
+  if (existing) { existing.showModal(); return; }
+  const host = location.origin;
+  const el = document.createElement('dialog');
+  el.setAttribute('data-help', '');
+  el.className = 'card';
+  el.style.cssText = 'max-width:480px;padding:20px;border:1px solid var(--line)';
+  el.innerHTML = '<div class="stack">'
+    + '<h2>Share straight from your phone</h2>'
+    + '<p class="muted" style="line-height:1.55"><b>iPhone.</b> Shortcuts \u2192 new shortcut \u2192 \u24D8 \u2192 '
+    + 'turn on <b>Show in Share Sheet</b>. Add one action, <b>Get Contents of URL</b>:</p>'
+    + '<pre class="recipe">URL      ' + esc(host) + '/v1/artifacts\n'
+    + 'Method   POST\n'
+    + 'Headers  Authorization : Bearer &lt;your token&gt;\n'
+    + 'Body     Form\n'
+    + '           file = Shortcut Input</pre>'
+    + '<p class="muted" style="line-height:1.55">It then appears in WhatsApp\u2019s share sheet. The token sits in '
+    + 'the shortcut in plain text, so if the phone is lost use <b>Sign out everywhere</b> on the Household page.</p>'
+    + '<p class="muted" style="line-height:1.55"><b>Android.</b> The same request from Tasker or MacroDroid, which '
+    + 'can also fire on a notification \u2014 the only way to catch something nobody opened. iPhones cannot do that.</p>'
+    + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close-help>Close</button></div>'
+    + '</div>';
+  main.appendChild(el);
+  el.querySelector('[data-close-help]').addEventListener('click', () => el.close());
+  el.showModal();
 }
 
 function inboundCard() {
-  const addr = store.household ? store.household.inbound_address : '';
-  return '<div class="card pad row wrap" style="gap:14px">'
-    + '<span class="glyph blue" aria-hidden="true">✉</span>'
-    + '<span class="grow"><span style="font-size:12.5px;font-weight:600;display:block">Forward school mail here</span>'
-    + '<span class="mono" style="font-size:12.5px;color:var(--primary)">' + esc(addr) + '</span></span>'
-    + '<span class="muted" style="max-width:340px;text-align:right;line-height:1.5">Mail from a member whose provider vouched for it is accepted. Anything else waits in quarantine.</span>'
-    + '<button class="btn ghost sm" data-copy>Copy</button></div>';
+  const h = store.household || {};
+  const ways = [
+    {
+      key: 'paste',
+      live: true,
+      glyph: '\u270E',
+      tone: '',
+      title: 'Paste or upload',
+      what: 'Copy a WhatsApp message and paste it, or add a photo, screenshot or PDF.',
+      value: '',
+      hint: 'Copied text reads better than a screenshot of it.',
+    },
+    {
+      key: 'whatsapp',
+      live: !!h.whatsapp_number,
+      glyph: '\u2709',
+      tone: 'green',
+      title: 'Forward on WhatsApp',
+      what: 'Long-press the message, Forward, and pick this number. Several at once is fine.',
+      value: h.whatsapp_number || '',
+      hint: h.whatsapp_number
+        ? 'Only numbers saved against a member are accepted.'
+        : 'Not set up yet \u2014 needs a WhatsApp business number. Paste works meanwhile.',
+    },
+    {
+      key: 'email',
+      live: !!h.inbound_address,
+      glyph: '\u2192',
+      tone: 'blue',
+      title: 'Forward by email',
+      what: 'Give this address to the school, or forward circulars to it yourself.',
+      value: h.inbound_address || '',
+      hint: 'Mail from a member whose provider vouched for it is accepted; anything else waits in quarantine.',
+    },
+    {
+      key: 'phone',
+      live: true,
+      glyph: '\u2191',
+      tone: 'amber',
+      title: 'From your phone',
+      what: 'Share straight from WhatsApp or the school app, without opening this.',
+      value: '',
+      hint: 'iPhone: a Shortcut in the share sheet. Android: Tasker can also catch notifications nobody opened.',
+    },
+  ];
+
+  return '<section class="card pad stack" style="gap:12px">'
+    + '<div class="row wrap" style="gap:8px"><h2>Ways in</h2>'
+    + '<span class="muted">school notices arrive however they arrive</span></div>'
+    + '<div class="ways">'
+    + ways.map((w) =>
+      '<div class="way' + (w.live ? '' : ' off') + '">'
+      + '<div class="row" style="gap:9px;align-items:flex-start">'
+      + '<span class="glyph ' + (w.live ? w.tone : '') + '" style="width:28px;height:28px;font-size:13px" aria-hidden="true">'
+      + w.glyph + '</span>'
+      + '<span class="grow"><span class="row wrap" style="gap:6px">'
+      + '<span style="font-size:13px;font-weight:600">' + esc(w.title) + '</span>'
+      + (w.live ? '' : '<span class="tag">not set up</span>') + '</span>'
+      + '<span class="sub">' + esc(w.what) + '</span></span></div>'
+      + (w.value
+        ? '<div class="row" style="gap:7px"><code class="addr">' + esc(w.value) + '</code>'
+          + '<button class="btn ghost sm" data-copy="' + esc(w.value) + '">Copy</button></div>'
+        : '')
+      + (w.key === 'paste'
+        ? '<button class="btn sm" data-add style="align-self:flex-start">Add a notice</button>' : '')
+      + (w.key === 'phone'
+        ? '<button class="btn ghost sm" data-shortcut style="align-self:flex-start">How</button>' : '')
+      + '<p class="muted" style="line-height:1.45">' + esc(w.hint) + '</p>'
+      + '</div>').join('')
+    + '</div></section>';
 }
 
 function noticeRow(a) {
@@ -1133,6 +1229,7 @@ async function householdView(main) {
   }
 
   wireHousehold(main, household);
+  wireWays(main, null);
 }
 
 function sessionsCard(sessions) {

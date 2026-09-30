@@ -96,3 +96,18 @@ async def test_a_pasted_message_is_a_notice_like_any_other(family, database):
     assert again.status_code == 201
     assert await database.fetchval("SELECT count(*) FROM blobs") == 1
     assert await database.fetchval("SELECT count(*) FROM input_artifacts") == 2
+
+
+async def test_the_household_says_which_ways_in_are_live(family, monkeypatch):
+    """The console only offers a way in that actually works, so it has to be
+    told whether a WhatsApp number is configured."""
+    from familyos.settings import settings
+
+    monkeypatch.setattr(settings, "whatsapp_business_number", "")
+    off = (await family.client.get("/v1/household", headers=family.h("amma"))).json()
+    assert off["whatsapp_number"] is None
+    assert off["inbound_address"].endswith("@in.familyos.test")
+
+    monkeypatch.setattr(settings, "whatsapp_business_number", "+91 80 4567 8910")
+    on = (await family.client.get("/v1/household", headers=family.h("amma"))).json()
+    assert on["whatsapp_number"] == "+91 80 4567 8910"

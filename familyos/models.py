@@ -46,6 +46,9 @@ class Household(BaseModel):
     id: uuid.UUID
     name: str
     inbound_address: str
+    # Null until a business number is configured: the console only offers a way
+    # in that actually works.
+    whatsapp_number: str | None = None
     status: str
     created_at: datetime
     members: list[Member] = []

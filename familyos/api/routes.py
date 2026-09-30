@@ -46,6 +46,7 @@ router = APIRouter(prefix="/v1")
 
 def _household(row: dict) -> Household:
     return Household(id=row["id"], name=row["name"], inbound_address=identity.inbound_address(row["inbound_token"]),
+                     whatsapp_number=settings.whatsapp_business_number or None,
                      status=row["status"], created_at=row["created_at"],
                      members=[Member(**m) for m in row.get("members", [])])
 
