@@ -69,6 +69,7 @@ FROM obligations o
 JOIN input_artifacts a ON a.id = o.artifact_id
 JOIN members m ON m.household_id = o.household_id AND m.role <> 'child'
 WHERE o.due_date IS NOT NULL
+  AND o.superseded_at IS NULL
   AND o.status = $4
   AND a.status = 'accepted'
   AND (a.visibility = 'shared' OR a.submitted_by = m.id)
@@ -134,6 +135,12 @@ def compose(row: dict) -> tuple[str, str]:
         subject = row["title"] + " " + (_DUE_WORDS.get(row["action"]) or "is coming up")
         body = row["title"] + " " + timing + ".\n\n"
 
+    if row.get("contested"):
+        # The link is only proposed, so the reminder still goes out -- being
+        # reminded about something already changed is a nuisance; not being
+        # reminded about something that still stands is the real harm.
+        body += ("\nA later notice looks like it changes this, and nobody has confirmed that yet. "
+                 "Check before acting on it.\n")
     if row.get("subject_name"):
         body += "For: " + row["subject_name"] + "\n"
     body += "From a notice received " + row["received_at"].date().isoformat() + ".\n"
@@ -173,7 +180,9 @@ CHANNELS = {"log": _send_log, "email": _send_email}
 
 _DUE = """
 SELECT r.*, o.title, o.action, o.due_date, o.subject_member_id, m.email, m.display_name,
-       a.received_at, c.subject_name
+       a.received_at, c.subject_name,
+       EXISTS (SELECT 1 FROM amendments am
+               WHERE am.amends_claim_id = o.claim_id AND am.status = 'proposed') AS contested
 FROM reminders r
 JOIN obligations o ON o.id = r.obligation_id
 JOIN members m ON m.id = r.member_id

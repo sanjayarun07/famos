@@ -22,7 +22,8 @@ calendar entries for a member to accept or dismiss. See
 the test set.
 
 See [docs/architecture.md](docs/architecture.md) for how it fits together,
-[docs/reminders.md](docs/reminders.md) for how the family gets told, and
+[docs/reminders.md](docs/reminders.md) for how the family gets told,
+[docs/reconciliation.md](docs/reconciliation.md) for revised notices, and
 [docs/provenance.md](docs/provenance.md) for code taken from Orbit.
 
 ## Run it
@@ -79,6 +80,7 @@ ruff check .
 | POST, GET | `/v1/consents`; POST `/v1/consents/{id}/withdraw` | guardians |
 | POST | `/v1/members/{id}/erase`, `/v1/household/erase` | guardians |
 | GET | `/v1/erasures/{id}` | members |
+| GET | `/v1/amendments`; POST `/v1/amendments/{id}/decision` | members who can see both notices |
 | GET | `/v1/reminders` | members: what they will be told about, and were |
 | GET | `/v1/audit` | guardians |
 | GET | `/v1/artifacts/{id}/extraction`; POST `/v1/artifacts/{id}/extract` | members, visibility applies |

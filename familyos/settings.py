@@ -72,5 +72,9 @@ class Settings(BaseSettings):
     smtp_password: str = Field(default="", repr=False)
     smtp_from: str = ""
 
+    # Reconciliation (familyos/reconcile.py). Links a revised notice to the one
+    # it revises. Always proposed, never applied on its own.
+    reconciliation_enabled: bool = True
+
 
 settings = Settings()
