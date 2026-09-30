@@ -53,6 +53,27 @@ curl -s localhost:8000/v1/artifacts -H "Authorization: Bearer $TOKEN" \
   -F file=@notice.pdf -F visibility=shared
 ```
 
+## Getting notices in today
+
+Most school traffic is WhatsApp and the school's own app, and neither offers a
+feed you can subscribe to. Until a WhatsApp business number is verified, these
+work now and need nothing external:
+
+- **Paste it.** Long-press the WhatsApp message, Copy, then *Add a notice →
+  Paste a message*. Copied text reads better than OCR of a screenshot of it.
+- **Share a screenshot.** Images are read with OCR, so a screenshot of the
+  school app works; the claim still points at the pixels it came from.
+- **From an iPhone, without opening the console.** Shortcuts → new shortcut →
+  ⓘ → *Show in Share Sheet*, one **Get Contents of URL** action:
+  `POST https://<your host>/v1/artifacts`, header
+  `Authorization: Bearer <token>`, request body *Form* with `file` = Shortcut
+  Input. It then appears in WhatsApp's share sheet. The token sits in the
+  shortcut in plain text, so issue one for that phone and revoke it from
+  *Household → Sign out everywhere* if the phone is lost.
+- **On Android**, Tasker or MacroDroid can post to the same endpoint on a
+  notification, which is the only way to capture something nobody opened. iOS
+  has no equivalent and never will.
+
 Forwarding email: point your inbound mail provider (SES, Postmark, Mailgun,
 Cloudflare Email Routing) at `POST /v1/inbound/email`, posting the raw message
 with the `X-FamilyOS-Webhook-Secret` header and, if available, the envelope

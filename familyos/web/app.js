@@ -386,7 +386,13 @@ function uploadDialog() {
   return '<dialog class="card" style="max-width:440px;padding:20px;border:1px solid var(--line)">'
     + '<form class="stack" data-form="upload">'
     + '<h2>Add a notice</h2>'
-    + '<label>File<input type="file" name="file" required></label>'
+    + '<div class="tabs"><button type="button" data-how="paste" aria-pressed="true">Paste a message</button>'
+    + '<button type="button" data-how="file" aria-pressed="false">Upload a file</button></div>'
+    + '<label data-pane="paste">Paste it here'
+    + '<textarea name="text" rows="7" placeholder="Long-press the WhatsApp message, Copy, then paste here."></textarea>'
+    + '</label>'
+    + '<p class="muted" data-pane="paste">A screenshot works too, but copied text reads better than OCR of it.</p>'
+    + '<label data-pane="file" hidden>File<input type="file" name="file"></label>'
     + '<label>Who can see it<select name="visibility">'
     + '<option value="private">Private to me</option><option value="shared">Shared with the household</option>'
     + '</select></label>'
@@ -402,12 +408,34 @@ function uploadDialog() {
 
 function wireUpload(dlg) {
   dlg.querySelector('[data-close]').addEventListener('click', () => dlg.close());
+
+  let how = 'paste';
+  dlg.querySelectorAll('[data-how]').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      how = tab.dataset.how;
+      dlg.querySelectorAll('[data-how]').forEach((t) => t.setAttribute('aria-pressed', String(t === tab)));
+      dlg.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== how; });
+    });
+  });
+
   dlg.querySelector('form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const form = ev.target;
     const f = new FormData(form);
-    const file = f.get('file');
-    if (!file || !file.size) { flash('Pick a file first.', true); return; }
+
+    let file;
+    if (how === 'paste') {
+      const text = (f.get('text') || '').trim();
+      if (!text) { flash('Paste the message first.', true); return; }
+      // A pasted message is a notice like any other: same bytes-in, same
+      // hash, same dedup. Two parents pasting the same message store once.
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+      file = new File([text], 'pasted ' + stamp + '.txt', { type: 'text/plain' });
+    } else {
+      file = f.get('file');
+      if (!file || !file.size) { flash('Pick a file first.', true); return; }
+    }
+
     const body = new FormData();
     body.append('file', file);
     body.append('visibility', f.get('visibility'));
