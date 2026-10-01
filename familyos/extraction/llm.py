@@ -22,7 +22,7 @@ from familyos.extraction.parse import ParsedDocument
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "extract-v1"
+PROMPT_VERSION = "extract-v2"
 # Refused requests are retried on a fallback model chosen by the API.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 MAX_INPUT_CHARS = 400_000
@@ -46,7 +46,8 @@ Rules:
 - subject_name: only when the notice names a specific student. Blank lines to fill in are not names.
 - A blank template (every date and name is a blank line) states no dates, costs or deadlines: give only the form claim.
 - A notice addressed to schools or staff rather than families asks nothing of a parent: set actionable false and explain why in non_actionable_reason. Also set actionable false when the notice only informs.
-- quote: copy the words the claim comes from exactly as they appear in the text, character for character, one sentence or line, at most 200 characters. page: the page the quote is on.
+- Notices are not always in English. Read whatever language the notice is in, and write title, place, applies_to and the other text fields in that same language: a family reads its own notices, and a translated title cannot be checked against the page. Dates, amounts and currency codes are normalised regardless of the language they were written in, including when the digits are in another script.
+- quote: copy the words the claim comes from exactly as they appear in the text, character for character, in the notice's own language and script, one sentence or line, at most 200 characters. A translated or transliterated quote cannot be found in the text and the claim will be discarded. page: the page the quote is on.
 - confidence: from 0 to 1, how sure you are the claim is right as stated.
 """
 

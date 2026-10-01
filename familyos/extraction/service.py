@@ -37,6 +37,12 @@ HANDLER_VERSION = "1"
 # as pipeline.UNGROUNDED_PENALTY: kept and shown, trusted less.
 HEARSAY_PENALTY = 0.8
 
+# What a claim is worth when its page was read by OCR rather than lifted from a
+# text layer. Characters get confused in ways that matter here: a Devanagari
+# notice read in testing turned "14 नवंबर" into "44 नवंबर", which on a deadline
+# is not a small error.
+OCR_PENALTY = 0.9
+
 
 async def enqueue(conn: asyncpg.Connection, household_id: uuid.UUID, artifact_ids: list[uuid.UUID], *,
                   member_id: uuid.UUID | None = None) -> list[dict]:
@@ -131,6 +137,8 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
         # still somebody’s retelling, so it is not worth as much as the
         # school’s own circular saying the same thing.
         hearsay = bool((artifact["source"] or {}).get("forwarded"))
+        from_ocr = extraction.ocr_pages > 0
+        confidence_factor = (HEARSAY_PENALTY if hearsay else 1.0) * (OCR_PENALTY if from_ocr else 1.0)
         allowed = await consent.consented_children(conn, household_id)
         named = [c.subject_name for c in extraction.claims if c.subject_name]
         dropped = sum(1 for n in named if not any(consent.names_match(n, d) for _, d in allowed))
@@ -160,7 +168,7 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
               list(c.requires), c.optional, c.uncertain,
               c.amends, c.change, c.quote, c.page, (c.location or {}).get("start"), (c.location or {}).get("end"),
               (c.location or {}).get("boxes"), (c.location or {}).get("match"),
-              round(c.confidence * (HEARSAY_PENALTY if hearsay else 1.0), 3))
+              round(c.confidence * confidence_factor, 3))
              for i, c in enumerate(extraction.claims)])
         rows = [(uuid.uuid4(), household_id, artifact_id, claim_ids[o.claim_index], subject, o.kind, o.action, o.title,
                  o.due_date, o.end_date, o.due_time, o.optional)
@@ -176,6 +184,7 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
                   "grounded": sum(1 for c in extraction.claims if c.grounded), "obligations": len(rows),
                   "actionable": extraction.actionable, "extractor": x.name, "model": x.model,
                   "prompt_version": x.prompt_version, "names_dropped": dropped, "hearsay": hearsay,
+                  "scripts": extraction.scripts, "from_ocr": from_ocr,
                   "duplicate_of": (merged or {}).get("first_artifact_id"),
                   "obligations_superseded": (merged or {}).get("obligations_superseded", 0)}
         await audit.record(household_id, "extraction.completed", actor_kind="system", target_type="artifact",

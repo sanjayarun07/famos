@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     extraction_model: str = Field(default="openai/gpt-5.6-sol",
                                   validation_alias=AliasChoices("FAMILYOS_EXTRACTION_MODEL", "RESEARCH_MODEL"))
     extraction_effort: str = "medium"
+    # Scripts the OCR should expect, as Tesseract language codes joined by "+".
+    # English alone reads a Devanagari notice as noise, not as bad English, so
+    # a deployment serving Hindi-medium schools must say so here and have the
+    # matching tesseract-ocr-<lang> package installed.
+    ocr_languages: str = "eng"
     anthropic_api_key: str = Field(default="", repr=False,
                                    validation_alias=AliasChoices("FAMILYOS_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"))
     openai_api_key: str = Field(default="", repr=False,

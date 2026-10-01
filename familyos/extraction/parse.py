@@ -21,6 +21,49 @@ from dataclasses import dataclass, field
 from email import policy
 from email.parser import BytesParser
 
+from familyos.settings import settings
+
+# Unicode ranges, which is as far as letters alone can honestly take you.
+SCRIPT_RANGES = (
+    ("devanagari", 0x0900, 0x097F),   # Hindi, Marathi, Nepali, Sanskrit
+    ("bengali", 0x0980, 0x09FF),
+    ("gurmukhi", 0x0A00, 0x0A7F),
+    ("gujarati", 0x0A80, 0x0AFF),
+    ("oriya", 0x0B00, 0x0B7F),
+    ("tamil", 0x0B80, 0x0BFF),
+    ("telugu", 0x0C00, 0x0C7F),
+    ("kannada", 0x0C80, 0x0CFF),
+    ("malayalam", 0x0D00, 0x0D7F),
+    ("arabic", 0x0600, 0x06FF),       # Urdu
+    ("latin", 0x0041, 0x024F),
+)
+# Below this share of the letters a script is incidental: a Latin word inside a
+# Hindi notice does not make it bilingual.
+SCRIPT_MIN_SHARE = 0.08
+
+
+def detect_scripts(text: str) -> list[str]:
+    """Which writing systems the text uses, most used first.
+
+    Script, not language: Hindi, Marathi and Nepali all write in Devanagari,
+    and claiming to have detected a language from letters alone would be a
+    guess dressed up as a fact."""
+    counts: dict[str, int] = {}
+    total = 0
+    for ch in text:
+        if not ch.isalpha():
+            continue
+        for name, low, high in SCRIPT_RANGES:
+            if low <= ord(ch) <= high:
+                counts[name] = counts.get(name, 0) + 1
+                total += 1
+                break
+    if not total:
+        return []
+    return [name for name, n in sorted(counts.items(), key=lambda kv: -kv[1])
+            if n / total >= SCRIPT_MIN_SHARE]
+
+
 PARSER_VERSION = "parse-v1"
 
 # A PDF page with fewer words than this in its text layer is treated as a scan.
@@ -55,6 +98,15 @@ class ParsedDocument:
     @property
     def ocr_pages(self) -> int:
         return sum(1 for p in self.pages if p.source == "ocr")
+
+    @property
+    def scripts(self) -> list[str]:
+        """Which writing systems the text is in, most used first.
+
+        Script, not language: Hindi, Marathi and Nepali all write in
+        Devanagari, and claiming to have detected a language from letters
+        alone would be a guess dressed up as a fact."""
+        return detect_scripts(" ".join(p.text for p in self.pages))
 
     @property
     def char_count(self) -> int:
@@ -145,10 +197,13 @@ def _ocr(image_bytes: bytes, scale: float, notes: list[str]) -> _Builder | None:
         from pytesseract import Output
 
         with Image.open(io.BytesIO(image_bytes)) as im:
-            d = pytesseract.image_to_data(im.convert("RGB"), lang="eng", output_type=Output.DICT)
+            d = pytesseract.image_to_data(im.convert("RGB"), lang=settings.ocr_languages,
+                                          output_type=Output.DICT)
     except Exception as exc:  # noqa: BLE001 - no OCR means no text, not a failed job
         if "ocr_unavailable" not in notes:
             notes.append("ocr_unavailable")
+        # A missing language pack fails here rather than silently reading a
+        # Hindi notice as nonsense English, which is the worse outcome.
         notes.append(f"ocr_error: {type(exc).__name__}")
         return None
     b = _Builder()

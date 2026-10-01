@@ -95,7 +95,7 @@ def finish(doc: ParsedDocument, claims: list[Claim], extractor_info: ExtractorIn
         notes.append("no_text")
     return Extraction(extractor=extractor_info, reference_date=reference_date, actionable=actionable,
                       non_actionable_reason=None if actionable else reason, claims=grounded,
-                      page_count=len(doc.pages), ocr_pages=doc.ocr_pages, notes=notes)
+                      page_count=len(doc.pages), ocr_pages=doc.ocr_pages, scripts=doc.scripts, notes=notes)
 
 
 async def extract(doc: ParsedDocument, reference_date: dt.date | None, extractor=None) -> Extraction:

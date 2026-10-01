@@ -7,7 +7,39 @@ words sit in the original. Actionable claims become **proposed obligations**
 that a member accepts or dismisses. Nothing is decided for the family, and
 nothing ever pays.
 
-English only for now.
+## Languages
+
+Notices are not always in English, and most Indian school circulars are not.
+
+**OCR has to be told.** `FAMILYOS_OCR_LANGUAGES` takes Tesseract codes joined
+by `+` (`eng+hin`), and the matching `tesseract-ocr-<lang>` package must be
+installed. This is not a quality setting: English-only OCR does not read a
+Devanagari notice badly, it reads it as noise. The same image gives
+
+```
+-l eng   feren afex diaz darstt Sa
+-l hin   विद्या मंदिर सीनियर सेकेंडरी स्कूल
+```
+
+**The quote stays in the notice's language.** A claim is checkable because its
+quote can be found in the page text; a translated or transliterated quote
+cannot be, and the claim would be discarded as ungrounded. So titles, places
+and `applies_to` are written in the notice's own language too -- a family reads
+its own notices. Dates, amounts and currencies are normalised regardless of the
+script their digits were written in.
+
+**Script is recorded, not language.** `extraction.scripts` lists the writing
+systems used, most used first. Hindi, Marathi and Nepali all write in
+Devanagari, so claiming a language from letters alone would be a guess dressed
+up as a fact. A script under 8% of the letters is incidental -- one English word
+in a Hindi notice does not make it bilingual.
+
+**OCR'd claims are trusted slightly less** (`OCR_PENALTY`, 0.9), the same shape
+as the ungrounded and hearsay penalties. Characters get confused in ways that
+matter: a Devanagari notice read in testing turned `14 नवंबर` into `44 नवंबर`,
+which on a deadline is not a small error.
+
+Translation is not done. A Hindi notice produces Hindi claims.
 
 ## Pipeline
 

@@ -23,7 +23,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      # The language packs and a Devanagari font, so the non-English tests run
+      # here rather than skipping quietly.
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-hin tesseract-ocr-tam fonts-lohit-deva
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: pytest -q

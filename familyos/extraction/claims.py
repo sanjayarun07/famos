@@ -66,4 +66,6 @@ class Extraction(BaseModel):
     claims: list[Claim]
     page_count: int
     ocr_pages: int = 0
+    # Writing systems the notice used, most used first. Script, not language.
+    scripts: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
