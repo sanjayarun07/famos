@@ -74,6 +74,14 @@ WhatsApp is checked at traffic lights. Set `FAMILYOS_REMINDER_CHANNEL=whatsapp`.
 Point Meta's webhook at `POST /v1/inbound/whatsapp`. The `GET` on the same path
 answers the subscription challenge.
 
+## Reading a group, in development only
+
+The Cloud API cannot read a class group, which makes realistic traffic hard to
+come by while building. `POST /v1/inbound/whatsapp/bridge` accepts relays from
+an unofficial client for that purpose -- off by default, and meant to stay a
+development tool rather than become a feature. The reasons, and what it costs
+the linked account, are in [wa-bridge.md](wa-bridge.md).
+
 ## Not yet
 
 - **The same notice forwarded by two parents** makes two artifacts, two

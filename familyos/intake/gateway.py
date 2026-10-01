@@ -137,7 +137,8 @@ async def receive_email(raw: bytes, recipient: str | None = None) -> tuple[dict,
 # WhatsApp (forwarded to the household's business number)
 # ----------------------------------------------------------------------------
 
-async def receive_whatsapp(message: whatsapp_adapter.Message, *, fetch=None) -> list[tuple[dict, bool]]:
+async def receive_whatsapp(message: whatsapp_adapter.Message, *, fetch=None,
+                           extra_source: dict | None = None) -> list[tuple[dict, bool]]:
     """One forwarded message. Text becomes an artifact; each attachment becomes
     a child of it, the way an email's attachments do.
 
@@ -155,7 +156,8 @@ async def receive_whatsapp(message: whatsapp_adapter.Message, *, fetch=None) -> 
 
     source = {"from": message.sender, "from_name": message.sender_name,
               "message_id": message.message_id, "sent_at": message.sent_at,
-              "forwarded": message.forwarded, "channel": "whatsapp"}
+              "forwarded": message.forwarded, "channel": "whatsapp",
+              **(extra_source or {})}
 
     downloaded: list[tuple[whatsapp_adapter.Media, bytes, str]] = []
     for media in message.media:

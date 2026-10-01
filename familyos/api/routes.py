@@ -12,7 +12,7 @@ from familyos import artifacts, audit, consent, erasure, identity, reconcile, re
 from familyos.api.deps import current_member, erasure_reader
 from familyos.extraction import service as extraction
 from familyos.identity import Principal
-from familyos.intake import gateway
+from familyos.intake import gateway, wa_bridge
 from familyos.intake import whatsapp as whatsapp_adapter
 from familyos.models import (
     Amendment,
@@ -310,6 +310,27 @@ async def inbound_whatsapp(request: Request, x_hub_signature_256: str | None = H
             # place will never become placeable: take it and drop it.
             refused += 1
     return {"received": received, "refused": refused}
+
+
+@router.post("/inbound/whatsapp/bridge", status_code=202, tags=["intake"], include_in_schema=False,
+             description="Development only. Accepts messages relayed by an unofficial WhatsApp client so a real "
+                         "class group can be read during development. Off unless FAMILYOS_WHATSAPP_BRIDGE_ENABLED.")
+async def inbound_whatsapp_bridge(request: Request, x_familyos_bridge_secret: str = Header("")):
+    if not settings.whatsapp_bridge_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    if not settings.whatsapp_bridge_secret or not hmac.compare_digest(
+            x_familyos_bridge_secret.encode(), settings.whatsapp_bridge_secret.encode()):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "bad bridge secret")
+    payload = await request.json()
+    try:
+        message, extra = wa_bridge.parse(payload)
+    except wa_bridge.BadBridgePayload as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    try:
+        stored = await gateway.receive_whatsapp(message, fetch=wa_bridge.media_fetcher(payload), extra_source=extra)
+    except gateway.Rejected as exc:
+        return {"received": 0, "refused": 1, "reason": exc.reason}
+    return {"received": len(stored), "refused": 0}
 
 
 # ----------------------------------------------------------------------------

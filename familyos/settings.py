@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     # The number as a parent would save it. Meta's phone_number_id is an
     # internal handle and no use to anyone forwarding a message.
     whatsapp_business_number: str = ""
+    # A development bridge for unofficial WhatsApp clients, which can read a
+    # class group where the Cloud API cannot. Off by default and meant to stay
+    # that way: those clients break WhatsApp's terms, the ban lands on the
+    # linked number, and a companion session can read every chat on it.
+    whatsapp_bridge_enabled: bool = False
+    whatsapp_bridge_secret: str = Field(default="", repr=False)
     whatsapp_api_base: str = "https://graph.facebook.com/v21.0"
 
     # Quarantine mail whose From address is not authenticated (DMARC, or
