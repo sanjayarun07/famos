@@ -90,3 +90,40 @@ that still stands is the harm.
 
 - Quiet hours, and one digest instead of several separate reminders.
 - A member choosing their own lead times, or opting out.
+
+## Sent once
+
+A reminder used to be selected, sent, then marked sent. Between the send and
+the mark there was a window: two workers could pick up the same row, and a
+crash after delivery would deliver again on the next sweep. One row per
+(obligation, member, reason, lead) stops a duplicate being *scheduled*, which
+is not the same as stopping it being *sent*.
+
+Now a row is claimed first -- moved to `sending` in the same statement that
+selects it, `FOR UPDATE SKIP LOCKED` so a second worker steps over it rather
+than queueing behind it -- and only then handed to the channel. `claimed_at` is
+what lets a claim be taken back: a worker that dies mid-send would otherwise
+leave the row in `sending` for ever, and never sent at all is worse than sent
+twice. `CLAIM_TTL` is ten minutes.
+
+This is at-least-once, and it cannot be anything else while the send is a
+network call to somebody else. What it does guarantee is that a duplicate needs
+a crash inside a window of milliseconds, rather than a second worker or an
+ordinary restart.
+
+## Visibility is decided twice
+
+Scheduling asks who may see an obligation *now*. A row made yesterday was
+answered with yesterday's visibility, and a notice can be made private
+afterwards -- so three things cancel a pending row: the obligation was decided,
+a later notice superseded it, or the member may no longer see the notice.
+
+The last one is why delivery checks again rather than trusting the sweep. A
+reminder is a sentence about a notice; sending it to somebody who can no longer
+open that notice leaks the notice. The cancel sweep keeps the queue tidy;
+delivery is the guarantee, because delivery is the moment it matters.
+
+Reading follows the same rule. `GET /v1/reminders` returns not "the rows made
+for this member" but "the rows this member may still be shown" -- a notice made
+private takes its reminders out of everyone else's list, the already-sent ones
+included. The rows stay for the audit trail; they stop being readable.

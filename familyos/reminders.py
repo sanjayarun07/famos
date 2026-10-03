@@ -26,7 +26,7 @@ import asyncio
 import datetime as dt
 import logging
 
-from familyos import audit, jobs
+from familyos import artifacts, audit, jobs
 from familyos.db import pool
 from familyos.identity import Principal
 from familyos.settings import settings
@@ -86,13 +86,25 @@ async def schedule(conn, today: dt.date) -> dict[str, int]:
         for reason, status in (("due", "accepted"), ("undecided", "proposed")):
             rows = await conn.fetch(_SCHEDULE, reason, lead, settings.reminder_channel, status, today)
             made[reason] += len(rows)
-    # A proposal that has since been decided should not nudge, and neither
-    # should anything whose obligation was dismissed.
+    # Scheduling asks who may see an obligation *now*; a row made yesterday
+    # was answered with yesterday's visibility. Three things can make a
+    # pending row wrong after it exists, and all three cancel it:
+    #
+    #   - the obligation was decided, so its reason no longer applies;
+    #   - a later notice superseded it, so the date it names may not hold;
+    #   - the notice was made private, so this member may no longer see it.
+    #
+    # The last is the one that matters most. A reminder is a sentence about a
+    # notice, so sending it to somebody who can no longer open that notice
+    # leaks the notice.
     cancelled = await conn.fetch(
-        "UPDATE reminders r SET status = 'cancelled' FROM obligations o "
-        "WHERE o.id = r.obligation_id AND r.status = 'pending' AND ("
+        "UPDATE reminders r SET status = 'cancelled' FROM obligations o, input_artifacts a "
+        "WHERE o.id = r.obligation_id AND a.id = o.artifact_id AND r.status = 'pending' AND ("
         "  (r.reason = 'undecided' AND o.status <> 'proposed') OR"
-        "  (r.reason = 'due' AND o.status <> 'accepted')) RETURNING r.id")
+        "  (r.reason = 'due' AND o.status <> 'accepted') OR"
+        "  o.superseded_at IS NOT NULL OR"
+        "  a.status <> 'accepted' OR"
+        "  NOT (a.visibility = 'shared' OR a.submitted_by = r.member_id)) RETURNING r.id")
     made["cancelled"] = len(cancelled)
     return made
 
@@ -196,25 +208,51 @@ async def _send_whatsapp(row: dict, subject: str, body: str) -> None:
 
 CHANNELS = {"log": _send_log, "email": _send_email, "whatsapp": _send_whatsapp}
 
-_DUE = """
-SELECT r.*, o.title, o.action, o.due_date, o.subject_member_id, m.email, m.display_name,
-       m.phone, a.received_at, c.subject_name,
-       EXISTS (SELECT 1 FROM amendments am
-               WHERE am.amends_claim_id = o.claim_id AND am.status = 'proposed') AS contested
-FROM reminders r
-JOIN obligations o ON o.id = r.obligation_id
-JOIN members m ON m.id = r.member_id
-JOIN input_artifacts a ON a.id = o.artifact_id
-LEFT JOIN claims c ON c.id = o.claim_id
-WHERE r.status = 'pending' AND r.send_after <= $1
-ORDER BY r.send_after
-LIMIT $2
+# A claim held this long belonged to a worker that died mid-send. Taking it
+# back risks a duplicate; leaving it means the reminder is never sent at all,
+# which is the worse of the two.
+CLAIM_TTL = dt.timedelta(minutes=10)
+
+# Select and claim in one statement. SKIP LOCKED is what makes a second worker
+# step over a row this one is taking rather than queue behind it.
+#
+# The visibility rule is applied again here, not only when the row was made:
+# the cancel sweep runs between deliveries, and a notice made private in that
+# gap must not be reminded about. Scheduling decides who would be told;
+# delivery decides again, because delivery is the moment it matters.
+_CLAIM = """
+WITH due AS (
+    SELECT r.id
+    FROM reminders r
+    JOIN obligations o ON o.id = r.obligation_id
+    JOIN input_artifacts a ON a.id = o.artifact_id
+    WHERE r.send_after <= $1
+      AND (r.status = 'pending' OR (r.status = 'sending' AND r.claimed_at < $1 - $3::interval))
+      AND o.superseded_at IS NULL
+      AND a.status = 'accepted'
+      AND (a.visibility = 'shared' OR a.submitted_by = r.member_id)
+    ORDER BY r.send_after
+    LIMIT $2
+    FOR UPDATE OF r SKIP LOCKED
+)
+UPDATE reminders r SET status = 'sending', claimed_at = $1, attempts = r.attempts + 1
+FROM due, obligations o, members m, input_artifacts a
+WHERE r.id = due.id AND o.id = r.obligation_id AND m.id = r.member_id AND a.id = o.artifact_id
+RETURNING r.id, r.household_id, r.obligation_id, r.member_id, r.reason, r.lead_days, r.channel,
+          r.attempts, r.send_after, r.status, r.sent_at,
+          o.title, o.action, o.due_date, o.subject_member_id, m.email, m.display_name,
+          m.phone, a.received_at,
+          (SELECT c.subject_name FROM claims c WHERE c.id = o.claim_id) AS subject_name,
+          EXISTS (SELECT 1 FROM amendments am
+                  WHERE am.amends_claim_id = o.claim_id AND am.status = 'proposed') AS contested
 """
 
 
 async def send_due(now: dt.datetime, limit: int = 200) -> dict[str, int]:
+    """Claim what is due, then send it. The claim is what stops a second
+    worker -- or an ordinary restart -- sending the same reminder twice."""
     counts = {"sent": 0, "failed": 0}
-    rows = await pool().fetch(_DUE, now, limit)
+    rows = await pool().fetch(_CLAIM, now, limit, CLAIM_TTL)
     for raw in rows:
         row = dict(raw)
         send = CHANNELS.get(row["channel"]) or _send_log
@@ -225,14 +263,16 @@ async def send_due(now: dt.datetime, limit: int = 200) -> dict[str, int]:
             counts["failed"] += 1
             logger.warning("reminder %s could not be sent", row["id"], exc_info=True)
             await pool().execute(
-                "UPDATE reminders SET attempts = attempts + 1, error = $2, "
-                "status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE 'pending' END WHERE id = $1",
+                # attempts was already counted when the row was claimed, so
+                # the claim is released rather than counted again.
+                "UPDATE reminders SET error = $2, claimed_at = NULL, "
+                "status = CASE WHEN attempts >= $3 THEN 'failed' ELSE 'pending' END WHERE id = $1",
                 row["id"], f"{type(exc).__name__}: {exc}"[:500], settings.reminder_max_attempts)
             continue
         counts["sent"] += 1
         async with pool().acquire() as conn, conn.transaction():
             await conn.execute(
-                "UPDATE reminders SET status = 'sent', sent_at = NOW(), attempts = attempts + 1, error = NULL WHERE id = $1",
+                "UPDATE reminders SET status = 'sent', sent_at = NOW(), error = NULL WHERE id = $1",
                 row["id"])
             # Counts and ids, never the notice's words.
             await audit.record(row["household_id"], "reminder.sent", actor_kind="system",
@@ -287,8 +327,15 @@ async def list_for(p: Principal, limit: int = 100) -> list[dict]:
         "SELECT r.id, r.obligation_id, r.reason, r.lead_days, r.send_after, r.channel, r.status, r.sent_at, "
         "o.title, o.action, o.due_date, o.subject_member_id "
         "FROM reminders r JOIN obligations o ON o.id = r.obligation_id "
-        "WHERE r.member_id = $1 AND r.household_id = $2 ORDER BY r.send_after LIMIT $3",
-        p.member_id, p.household_id, limit)
+        "JOIN input_artifacts a ON a.id = o.artifact_id "
+        # Not "the rows made for this member" but "the rows this member may
+        # still be shown". A notice made private takes its reminders out of
+        # the other members' lists, the already-sent ones included: the row
+        # stays for the audit trail and stops being readable. The argument
+        # order is the visibility rule's own, so the fragment goes in as it is.
+        f"WHERE r.member_id = $2 AND {artifacts.VISIBLE_TO_MEMBER} "
+        "ORDER BY r.send_after LIMIT $3",
+        p.household_id, p.member_id, limit)
     return [dict(r) for r in rows]
 
 

@@ -176,6 +176,7 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
         await conn.executemany(
             "INSERT INTO obligations (id, household_id, artifact_id, claim_id, subject_member_id, kind, action, title, due_date, "
             "end_date, due_time, optional) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)", rows)
+        unsupported = await _supersede_unsupported(conn, household_id, artifact_id, proposed)
         # Now the claims exist, see whether any of them revises an earlier
         # notice, and whether this is simply the same notice arriving again.
         amendments = await reconcile.propose(conn, household_id, artifact_id)
@@ -185,6 +186,7 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
                   "actionable": extraction.actionable, "extractor": x.name, "model": x.model,
                   "prompt_version": x.prompt_version, "names_dropped": dropped, "hearsay": hearsay,
                   "scripts": extraction.scripts, "from_ocr": from_ocr,
+                  "accepted_superseded": unsupported,
                   "duplicate_of": (merged or {}).get("first_artifact_id"),
                   "obligations_superseded": (merged or {}).get("obligations_superseded", 0)}
         await audit.record(household_id, "extraction.completed", actor_kind="system", target_type="artifact",
@@ -195,6 +197,37 @@ async def save(household_id: uuid.UUID, artifact_id: uuid.UUID, extraction: Extr
 # ----------------------------------------------------------------------------
 # reading and deciding
 # ----------------------------------------------------------------------------
+
+async def _supersede_unsupported(conn: asyncpg.Connection, household_id: uuid.UUID, artifact_id: uuid.UUID,
+                                 proposed: list) -> int:
+    """A re-read of the same notice can disagree with a decision already made.
+
+    Deleting the still-proposed obligations is safe -- nobody answered them.
+    An *accepted* one is different: a person said yes to it, and that decision
+    is theirs, not ours to drop. But leaving it untouched is not safe either.
+    If the new reading moves the date, or no longer finds the claim at all, the
+    accepted row goes on naming a date the notice no longer gives -- and goes
+    on reminding about it, which is the one thing this is all for.
+
+    So neither: an accepted obligation the new reading no longer supports is
+    superseded, by this same notice. Superseded means reminders stop (the
+    scheduler skips it and the sweep cancels what is pending), the row stays
+    where the family can see what happened to it, and the corrected date
+    arrives beside it as a fresh proposal to accept. What a person decided is
+    recorded; what the notice says now is what the family is reminded of.
+    """
+    titles = [o.title for o in proposed]
+    dates = [o.due_date for o in proposed]
+    rows = await conn.fetch(
+        "UPDATE obligations o SET superseded_at = NOW(), superseded_by_artifact_id = $2 "
+        "WHERE o.household_id = $1 AND o.artifact_id = $2 AND o.status = 'accepted' AND o.superseded_at IS NULL "
+        # NOT DISTINCT FROM so an undated obligation matches an undated
+        # proposal rather than matching nothing.
+        "AND NOT EXISTS (SELECT 1 FROM unnest($3::text[], $4::date[]) AS n(title, due_date) "
+        "                WHERE n.title = o.title AND n.due_date IS NOT DISTINCT FROM o.due_date) "
+        "RETURNING o.id", household_id, artifact_id, titles, dates)
+    return len(rows)
+
 
 async def get_for_artifact(p: Principal, artifact_id: uuid.UUID) -> dict:
     """The current extraction of an artifact the member can see, with its

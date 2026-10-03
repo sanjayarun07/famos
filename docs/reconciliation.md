@@ -113,3 +113,25 @@ It still becomes a task. Held less confidently is not the same as ignored.
   better candidate for an already-decided link.
 - The model is never asked. It read the amendment; it could also be asked which
   notice it means, with the candidates in front of it.
+
+## Re-reading a notice somebody already answered
+
+Extraction is not final. A better model, a fixed prompt or a second pass can
+read the same circular differently -- and by then somebody may have accepted
+what the first pass said.
+
+Deleting the still-proposed obligations is safe: nobody answered them. An
+**accepted** one is different. The decision is a person's, not ours to drop.
+But leaving it untouched is not safe either: if the new reading moves the date,
+or no longer finds the claim at all, the accepted row goes on naming a date the
+notice no longer gives -- and goes on reminding about it, which is the one thing
+all of this is for.
+
+So neither. An accepted obligation the new reading no longer supports is
+**superseded, by the same notice**. Superseded means reminders stop (the
+scheduler skips it, and the sweep cancels what is already pending), the row
+stays where the family can see what became of it, and the corrected date
+arrives beside it as a fresh proposal to accept.
+
+What a person decided is recorded. What the notice says now is what the family
+is reminded of. A reading that agrees with the decision changes nothing.
