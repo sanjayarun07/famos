@@ -134,6 +134,64 @@ async def receive_email(raw: bytes, recipient: str | None = None) -> tuple[dict,
 
 
 # ----------------------------------------------------------------------------
+# connected Gmail
+# ----------------------------------------------------------------------------
+
+async def receive_gmail(household_id: uuid.UUID, member_id: uuid.UUID, raw: bytes, *,
+                        gmail_id: str, thread_id: str | None = None) -> tuple[dict, bool]:
+    """One message out of a member's own connected mailbox.
+
+    The trust question here is not the one forwarding asks. Forwarded mail
+    arrives from a stranger at an address that says which household it was
+    aimed at, so the sender has to be matched to a member and authenticated
+    before anything is kept. This message was fetched with the member's own
+    token out of the member's own mailbox: nobody chose to send it to us, and
+    the sender is the school, not the member.
+
+    So it mirrors the WhatsApp bridge rather than forwarding. The member
+    *received* it, so it is stored for them, privately, and the school's
+    address goes in `source` the way an email's From does. There is no
+    quarantine lane: a message we cannot attribute is a message we would not
+    have been given.
+
+    Attachments become children, exactly as they do for forwarded mail -- the
+    circular is nearly always the PDF, and the covering note is nearly always
+    where the date is.
+    """
+    if len(raw) > settings.max_email_bytes:
+        raise Rejected("too_large", status=413)
+    message = email_adapter.parse(raw)
+    source = {"from": message.sender, "to": message.recipients, "subject": message.subject,
+              "message_id": message.message_id, "date": message.date,
+              "sender_authenticated": message.sender_authenticated,
+              "channel": "gmail", "gmail_id": gmail_id, "thread_id": thread_id,
+              "skipped_attachments": [{"media_type": a.media_type, "size_bytes": len(a.data)}
+                                      for a in message.attachments if sniff(a.data, a.media_type) not in ALLOWED]}
+    async with pool().acquire() as conn, conn.transaction():
+        parent, duplicate = await artifacts.create(conn, household_id, artifacts.NewArtifact(
+            data=raw, media_type="message/rfc822", channel="gmail", visibility="private", status="accepted",
+            submitted_by=member_id, source=source,
+            # Gmail's own id, so re-reading an overlapping window stores
+            # nothing new and a restarted poller is safe.
+            dedup_key=f"gmail:{gmail_id}"), actor_kind="inbound")
+        if duplicate:
+            return parent, True
+        stored = [parent["id"]]
+        for attachment in message.attachments:
+            media_type = sniff(attachment.data, attachment.media_type)
+            if media_type not in ALLOWED or not attachment.data:
+                continue
+            child, _ = await artifacts.create(conn, household_id, artifacts.NewArtifact(
+                data=attachment.data, media_type=media_type, channel="gmail_attachment", visibility="private",
+                status="accepted", submitted_by=member_id,
+                filename=_clean_filename(attachment.filename), parent_id=parent["id"]), actor_kind="inbound")
+            stored.append(child["id"])
+        await extraction.enqueue(conn, household_id, stored, member_id=member_id)
+        parent = dict(await conn.fetchrow(artifacts._SELECT + " WHERE a.id = $1", parent["id"]))
+    return parent, False
+
+
+# ----------------------------------------------------------------------------
 # WhatsApp (forwarded to the household's business number)
 # ----------------------------------------------------------------------------
 

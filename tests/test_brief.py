@@ -189,3 +189,26 @@ async def test_the_brief_can_be_asked_for_another_day(family, database):
     assert today["items"][0]["reason"] == "soon" and today["items"][0]["when"] == "tomorrow"
     ahead = await _brief(family, limit=-1, on=(TODAY + dt.timedelta(days=1)).isoformat())
     assert ahead["items"][0]["reason"] == "today" and ahead["items"][0]["when"] == "today"
+
+
+async def test_a_mailbox_that_stopped_being_read_is_the_second_thing_said(family, database, monkeypatch):
+    """Everything else in the brief is only as complete as intake. A mailbox
+    FamilyOS can no longer read means notices are arriving nowhere, and the
+    family cannot see that for themselves -- so it outranks everything but a
+    date already gone."""
+    from tests.test_gmail import FakeGoogle, _connect
+    monkeypatch.setattr(settings, "google_client_id", "client-id.apps.googleusercontent.com")
+    monkeypatch.setattr(settings, "google_client_secret", "client-secret")
+
+    r = await family.upload("amma", pdf("m"), visibility="shared")
+    artifact_id = r.json()["artifact"]["id"]
+    await _obligation(database, family, artifact_id=artifact_id, due=TODAY, title="Falls today")
+    account = await _connect(family, FakeGoogle())
+    await database.execute("UPDATE google_accounts SET needs_reconnect = TRUE WHERE id = $1", account["id"])
+
+    body = await _brief(family, limit=-1)
+    assert [i["reason"] for i in body["items"]] == ["mailbox", "today"]
+    assert body["items"][0]["title"] == "amma@gmail.com"
+    assert body["items"][0]["mailbox_id"] == str(account["id"])
+    # Somebody else's mailbox is not in their brief, working or not.
+    assert [i["reason"] for i in (await _brief(family, "appa", limit=-1))["items"]] == ["today"]

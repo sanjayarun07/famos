@@ -261,7 +261,29 @@ class Reminder(BaseModel):
     subject_member_id: uuid.UUID | None
 
 
-BriefReason = Literal["missed", "overdue", "today", "undecided", "soon", "amendment", "quarantine"]
+class Mailbox(BaseModel):
+    """A connected Google mailbox. There is no field here for the token, and
+    no endpoint that returns one."""
+    id: uuid.UUID
+    email: str
+    scopes: list[str]
+    connected_at: datetime
+    last_polled_at: datetime | None = None
+    needs_reconnect: bool = False
+    last_error: str | None = None
+    backfill_done: bool = False
+    disconnected_at: datetime | None = None
+
+
+class MailboxAuthorization(BaseModel):
+    """Where to send the member, and the state that ties the callback back to
+    this request."""
+    url: str
+    state: str
+
+
+BriefReason = Literal["missed", "mailbox", "overdue", "today", "undecided", "soon", "amendment",
+                      "quarantine"]
 
 
 class BriefItem(BaseModel):
@@ -286,6 +308,7 @@ class BriefItem(BaseModel):
     obligation_id: uuid.UUID | None = None
     amendment_id: uuid.UUID | None = None
     artifact_id: uuid.UUID | None = None
+    mailbox_id: uuid.UUID | None = None
 
 
 class Brief(BaseModel):

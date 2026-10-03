@@ -111,5 +111,33 @@ class Settings(BaseSettings):
     # it revises. Always proposed, never applied on its own.
     reconciliation_enabled: bool = True
 
+    # Connected Gmail. A member grants read-only access to their own mailbox
+    # and the poller looks for school mail in it.
+    #
+    # `gmail.readonly` is a RESTRICTED scope: Google requires a CASA Tier 2
+    # security assessment before an app may ask the public for it, which takes
+    # weeks and is re-validated yearly. Until that clears, an OAuth client in
+    # testing mode may ask up to 100 named test users -- which is what an
+    # alpha is. Nothing here changes between the two; only the Google-side
+    # client does.
+    google_client_id: str | None = None
+    google_client_secret: str | None = Field(default=None, repr=False)
+    # Must match a redirect URI registered on the OAuth client exactly.
+    google_redirect_uri: str = "http://localhost:8000/v1/google/callback"
+    gmail_enabled: bool = False
+    gmail_poll_seconds: int = 300
+    # What counts as worth reading. Narrow on purpose: the point is school
+    # mail, not the member's whole inbox, and every message this does not
+    # match is one FamilyOS never sees.
+    gmail_query: str = "has:attachment OR subject:(school OR circular OR notice OR fee OR permission)"
+    # How far back the first pass reaches. A new connection should bring in
+    # this term's notices, not a decade of mail.
+    gmail_backfill_days: int = 30
+    gmail_max_per_poll: int = 25
+    # The authserv-id on mail Google itself delivered. Mail fetched from a
+    # member's own mailbox has already passed Google's checks, and this is how
+    # the stored copy says so.
+    google_authserv_id: str = "mx.google.com"
+
 
 settings = Settings()

@@ -15,6 +15,12 @@ What counts as mattering, worst first:
 
 - **missed** -- dated, nobody decided, and the date has gone. The exact failure
   this product exists to prevent, so it leads.
+- **mailbox** -- a connected mailbox has stopped being readable and needs
+  reconnecting. Second, because it is the only line here about something the
+  family cannot see: everything else in the brief is only as complete as
+  intake, and a dead mailbox means notices are arriving nowhere. Worth saying
+  loudly -- a Google client still in testing issues refresh tokens that expire
+  in seven days, so this is a weekly event until CASA clears.
 - **overdue** -- the family accepted it and the date has gone.
 - **today** -- whatever falls today, decided or not.
 - **undecided** -- a proposal with a date coming up. The one that gets missed.
@@ -41,10 +47,11 @@ import logging
 from familyos import artifacts, reconcile, reminders
 from familyos.db import pool
 from familyos.identity import Principal
+from familyos.intake import mailbox
 
 logger = logging.getLogger(__name__)
 
-REASONS = ("missed", "overdue", "today", "undecided", "soon", "amendment", "quarantine")
+REASONS = ("missed", "mailbox", "overdue", "today", "undecided", "soon", "amendment", "quarantine")
 RANK = {reason: index for index, reason in enumerate(REASONS)}
 DEFAULT_LIMIT = 3
 
@@ -141,6 +148,16 @@ async def _amendments(p: Principal) -> list[dict]:
         for row in rows]
 
 
+async def _mailboxes(p: Principal) -> list[dict]:
+    """The member's own connected mailboxes that have stopped working. Only
+    they can reconnect one, and only they can see it."""
+    return [_item(
+        "mailbox", account["email"],
+        "FamilyOS can no longer read this mailbox, so notices in it are not arriving",
+        mailbox_id=account["id"])
+        for account in await mailbox.list_for(p) if account["needs_reconnect"]]
+
+
 async def _quarantine(p: Principal) -> list[dict]:
     """Guardians only, the same as the review queue itself: an item nobody can
     vouch for would otherwise sit there unread."""
@@ -159,7 +176,8 @@ async def today(p: Principal, *, on: dt.date | None = None, limit: int = DEFAULT
     """The brief, worst first. `counts` is everything found, not everything
     shown, so "and 4 more" is honest."""
     on = on or dt.date.today()
-    found = await _obligations(p, on) + await _amendments(p) + await _quarantine(p)
+    found = (await _obligations(p, on) + await _mailboxes(p) + await _amendments(p)
+             + await _quarantine(p))
     found.sort(key=lambda i: (i["rank"], i.get("due_date") or dt.date.max, i["title"]))
 
     counts = {reason: 0 for reason in REASONS}

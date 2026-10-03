@@ -62,7 +62,13 @@ def _aad(household_id: uuid.UUID, digest: str) -> bytes:
     return household_id.bytes + bytes.fromhex(digest)
 
 
-async def _household_key(conn: asyncpg.Connection, household_id: uuid.UUID, *, lock: bool = False) -> bytes:
+async def household_key(conn: asyncpg.Connection, household_id: uuid.UUID, *, lock: bool = False) -> bytes:
+    """The household's data key, or nothing if the household is not active.
+
+    Public because blobs are not the only thing that must die with the key:
+    a connected mailbox's refresh token is sealed with this too, so erasing
+    a household also ends its access to the mailboxes it was reading.
+    """
     row = await conn.fetchrow(
         "SELECT status, wrapped_key FROM households WHERE id = $1" + (" FOR SHARE" if lock else ""), household_id)
     if row is None or row["status"] != "active":
@@ -78,7 +84,7 @@ async def _store_blob(conn: asyncpg.Connection, household_id: uuid.UUID, data: b
                                    household_id, digest)
     if existing is not None:
         return dict(existing)
-    key = await _household_key(conn, household_id, lock=True)
+    key = await household_key(conn, household_id, lock=True)
     blob_id = uuid.uuid4()
     storage_key = f"households/{household_id}/blobs/{blob_id}"
     await blobstore.store().put(storage_key, crypto.seal(key, data, _aad(household_id, digest)))
@@ -97,7 +103,7 @@ async def create(conn: asyncpg.Connection, household_id: uuid.UUID, new: NewArti
                  actor_kind: str = "member") -> tuple[dict, bool]:
     """Store the original and its envelope inside the caller's transaction.
     Returns (artifact, duplicate)."""
-    await _household_key(conn, household_id, lock=True)
+    await household_key(conn, household_id, lock=True)
     if new.dedup_key:
         existing = await conn.fetchrow(
             _SELECT + " WHERE a.household_id = $1 AND a.dedup_key = $2", household_id, new.dedup_key)
@@ -169,7 +175,7 @@ async def read_bytes(household_id: uuid.UUID, artifact: dict, *, actor: Principa
     """Decrypt an artifact's original and check it against its hash. Every
     read is audited, by the member who asked or by the system (extraction)."""
     async with pool().acquire() as conn:
-        key = await _household_key(conn, household_id)
+        key = await household_key(conn, household_id)
         blob = await conn.fetchrow("SELECT * FROM blobs WHERE id = $1", artifact["blob_id"])
         data = crypto.open_sealed(key, await blobstore.store().get(blob["storage_key"]), _aad(household_id, blob["sha256"]))
         if sha256(data) != blob["sha256"]:

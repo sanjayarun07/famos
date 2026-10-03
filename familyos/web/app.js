@@ -938,6 +938,7 @@ function wireObligationRows(container, rows, withLink) {
 
 const REASON = {
   missed: { tone: 'red', label: 'missed', glyph: '!' },
+  mailbox: { tone: 'red', label: 'not being read', glyph: '\u2709' },
   overdue: { tone: 'red', label: 'overdue', glyph: '!' },
   today: { tone: 'amber', label: 'today', glyph: '\u25CF' },
   undecided: { tone: 'amber', label: 'undecided', glyph: '?' },
@@ -954,6 +955,7 @@ function greeting() {
 
 /* Each line goes where the thing is actually dealt with. */
 function briefHref(i) {
+  if (i.reason === 'mailbox') return '#/household';
   if (i.reason === 'amendment') return '#/revisions';
   if (i.reason === 'quarantine') return '#/quarantine';
   return i.artifact_id ? '#/notices/' + i.artifact_id : '#/today';

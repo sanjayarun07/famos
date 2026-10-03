@@ -3,17 +3,19 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import uuid
 from datetime import date
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile, status
+from fastapi.responses import RedirectResponse
 
 from familyos import artifacts, audit, brief, consent, erasure, identity, reconcile, reminders
 from familyos.api.deps import current_member, erasure_reader
 from familyos.extraction import service as extraction
 from familyos.identity import Principal
-from familyos.intake import gateway, wa_bridge
+from familyos.intake import gateway, mailbox, wa_bridge
 from familyos.intake import whatsapp as whatsapp_adapter
 from familyos.models import (
     Amendment,
@@ -31,6 +33,8 @@ from familyos.models import (
     HouseholdEraseIn,
     HouseholdIn,
     IntakeResult,
+    Mailbox,
+    MailboxAuthorization,
     Member,
     MemberIn,
     Obligation,
@@ -42,6 +46,8 @@ from familyos.models import (
     VisibilityIn,
 )
 from familyos.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1")
 
@@ -227,6 +233,49 @@ async def decide_amendment(amendment_id: uuid.UUID, body: AmendmentDecisionIn,
                         "the member can see, so a private notice reminds nobody else.")
 async def list_reminders(limit: int = 100, p: Principal = Depends(current_member)):
     return [Reminder(**r) for r in await reminders.list_for(p, min(max(limit, 1), 500))]
+
+
+# ----------------------------------------------------------------------------
+# connected mailboxes
+# ----------------------------------------------------------------------------
+
+@router.get("/google/mailboxes", response_model=list[Mailbox], tags=["intake"])
+async def list_mailboxes(p: Principal = Depends(current_member)):
+    """The member's own connected mailboxes. Nobody sees anyone else's: a
+    mailbox is more private than a notice out of it."""
+    return [Mailbox(**m) for m in await mailbox.list_for(p)]
+
+
+@router.post("/google/mailboxes/authorize", response_model=MailboxAuthorization, tags=["intake"],
+             description="Start connecting a Gmail account. Send the member to `url`; Google returns them to the "
+                         "callback, which finishes it.")
+async def authorize_mailbox(p: Principal = Depends(current_member)):
+    return MailboxAuthorization(**await mailbox.begin(p))
+
+
+@router.get("/google/callback", include_in_schema=False)
+async def google_callback(code: str | None = None, state: str | None = None, error: str | None = None):
+    """Where Google sends the member back.
+
+    No FamilyOS token arrives on this request -- it is a browser redirect from
+    Google -- so the single-use state row is the only thing tying this consent
+    to a member, and a state we did not issue is refused.
+    """
+    if error or not code or not state:
+        return RedirectResponse("/app/#/household?mailbox=" + quote(error or "cancelled"))
+    try:
+        await mailbox.complete(state, code)
+    except (identity.Invalid, mailbox.NotConfigured) as exc:
+        logger.warning("could not finish connecting a mailbox: %s", exc)
+        return RedirectResponse("/app/#/household?mailbox=failed")
+    return RedirectResponse("/app/#/household?mailbox=connected")
+
+
+@router.post("/google/mailboxes/{account_id}/disconnect", response_model=Mailbox, tags=["intake"])
+async def disconnect_mailbox(account_id: uuid.UUID, p: Principal = Depends(current_member)):
+    """Stop reading it, overwrite the stored token and tell Google. Only the
+    member whose mailbox it is may do this."""
+    return Mailbox(**await mailbox.disconnect(p, account_id))
 
 
 @router.get("/brief", response_model=Brief, tags=["extraction"])
