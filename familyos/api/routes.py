@@ -11,7 +11,18 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import RedirectResponse
 
-from familyos import artifacts, audit, brief, consent, erasure, export, identity, reconcile, reminders
+from familyos import (
+    artifacts,
+    audit,
+    brief,
+    consent,
+    erasure,
+    export,
+    gaps,
+    identity,
+    reconcile,
+    reminders,
+)
 from familyos.api.deps import current_member, erasure_reader
 from familyos.extraction import service as extraction
 from familyos.identity import Principal
@@ -24,10 +35,14 @@ from familyos.models import (
     ArtifactExtraction,
     AuditEvent,
     Brief,
+    CaptureSummary,
     Consent,
     ConsentIn,
     Credentials,
     Erasure,
+    Gap,
+    GapIn,
+    GapResolveIn,
     Household,
     HouseholdCreated,
     HouseholdEraseIn,
@@ -233,6 +248,39 @@ async def decide_amendment(amendment_id: uuid.UUID, body: AmendmentDecisionIn,
                         "the member can see, so a private notice reminds nobody else.")
 async def list_reminders(limit: int = 100, p: Principal = Depends(current_member)):
     return [Reminder(**r) for r in await reminders.list_for(p, min(max(limit, 1), 500))]
+
+
+# ----------------------------------------------------------------------------
+# what did not arrive
+# ----------------------------------------------------------------------------
+
+@router.post("/intake-gaps", response_model=Gap, status_code=201, tags=["intake"],
+             description="A member says a notice never reached FamilyOS, and where it actually lived. "
+                         "Counted, never read: a gap produces no claims and no obligations.")
+async def report_gap(body: GapIn, p: Principal = Depends(current_member)):
+    return Gap(**await gaps.report(p, title=body.title, lived_where=body.lived_where,
+                                   also_emailed=body.also_emailed, had_date=body.had_date,
+                                   noticed_on=body.noticed_on, note=body.note))
+
+
+@router.get("/intake-gaps", response_model=list[Gap], tags=["intake"])
+async def list_gaps(limit: int = 200, p: Principal = Depends(current_member)):
+    """A guardian sees the household's reports; anyone else sees their own."""
+    return [Gap(**g) for g in await gaps.list_for(p, limit)]
+
+
+@router.post("/intake-gaps/{gap_id}/arrived", response_model=Gap, tags=["intake"])
+async def resolve_gap(gap_id: uuid.UUID, body: GapResolveIn, p: Principal = Depends(current_member)):
+    """Point a gap at the notice that eventually arrived."""
+    return Gap(**await gaps.resolve(p, gap_id, body.arrived_as))
+
+
+@router.get("/intake-gaps/summary", response_model=CaptureSummary, tags=["intake"],
+            description="Capture rate, and where the misses lived. The breakdown is the part that "
+                        "decides anything; the rate is an upper bound, because a family reports "
+                        "some of what it misses and never all.")
+async def capture_summary(since: date | None = None, p: Principal = Depends(current_member)):
+    return CaptureSummary(**await gaps.summary(p, since=since))
 
 
 # ----------------------------------------------------------------------------

@@ -282,6 +282,62 @@ class MailboxAuthorization(BaseModel):
     state: str
 
 
+LivedWhere = Literal["email", "whatsapp_group", "whatsapp_direct", "school_portal", "school_app",
+                     "other_app", "sms", "paper", "word_of_mouth", "unknown"]
+
+
+class GapIn(BaseModel):
+    """A member saying a notice never reached them here."""
+    title: str = Field(min_length=1, max_length=300)
+    lived_where: LivedWhere
+    # Unknown is different from no: if it was also emailed, the gap is a
+    # matching problem rather than a channel problem.
+    also_emailed: bool | None = None
+    had_date: bool = False
+    noticed_on: date | None = None
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class GapResolveIn(BaseModel):
+    """The notice that eventually arrived, or nothing to unset it."""
+    arrived_as: uuid.UUID | None = None
+
+
+class Gap(BaseModel):
+    id: uuid.UUID
+    reported_by: uuid.UUID
+    title: str
+    lived_where: LivedWhere
+    also_emailed: bool | None = None
+    had_date: bool
+    noticed_on: date | None = None
+    arrived_as: uuid.UUID | None = None
+    note: str | None = None
+    created_at: datetime
+
+
+class GapWhere(BaseModel):
+    lived_where: LivedWhere
+    count: int
+    with_a_date: int
+    also_emailed: int
+    arrived_later: int
+    # What this answer would mean doing, carried with the number so the
+    # finding and its consequence are not separated.
+    means: str
+
+
+class CaptureSummary(BaseModel):
+    since: date
+    captured: int
+    missed_reported: int
+    # None, not 1.0, when nothing has arrived yet.
+    capture_rate: float | None = None
+    captured_by_channel: dict[str, int]
+    missed_by_where: list[GapWhere]
+    caveat: str
+
+
 BriefReason = Literal["missed", "mailbox", "overdue", "today", "undecided", "soon", "amendment",
                       "quarantine"]
 
