@@ -4,11 +4,12 @@ from __future__ import annotations
 import hmac
 import json
 import uuid
+from datetime import date
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile, status
 
-from familyos import artifacts, audit, consent, erasure, identity, reconcile, reminders
+from familyos import artifacts, audit, brief, consent, erasure, identity, reconcile, reminders
 from familyos.api.deps import current_member, erasure_reader
 from familyos.extraction import service as extraction
 from familyos.identity import Principal
@@ -20,6 +21,7 @@ from familyos.models import (
     Artifact,
     ArtifactExtraction,
     AuditEvent,
+    Brief,
     Consent,
     ConsentIn,
     Credentials,
@@ -225,6 +227,14 @@ async def decide_amendment(amendment_id: uuid.UUID, body: AmendmentDecisionIn,
                         "the member can see, so a private notice reminds nobody else.")
 async def list_reminders(limit: int = 100, p: Principal = Depends(current_member)):
     return [Reminder(**r) for r in await reminders.list_for(p, min(max(limit, 1), 500))]
+
+
+@router.get("/brief", response_model=Brief, tags=["extraction"])
+async def daily_brief(limit: int = brief.DEFAULT_LIMIT, on: date | None = None,
+                      p: Principal = Depends(current_member)):
+    """The few things that matter today, worst first. Derived on every request
+    from what the member can see; nothing about it is stored."""
+    return Brief(**await brief.today(p, on=on, limit=limit))
 
 
 @router.get("/obligations", response_model=list[Obligation], tags=["extraction"])

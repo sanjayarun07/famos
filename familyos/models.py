@@ -261,6 +261,44 @@ class Reminder(BaseModel):
     subject_member_id: uuid.UUID | None
 
 
+BriefReason = Literal["missed", "overdue", "today", "undecided", "soon", "amendment", "quarantine"]
+
+
+class BriefItem(BaseModel):
+    """One line of the brief. Which ids are set depends on the reason: a dated
+    thing points at its obligation, a revision at the amendment to confirm, a
+    quarantined item at the notice a guardian has to vouch for."""
+    reason: BriefReason
+    rank: int
+    title: str
+    why: str
+    when: str | None = None
+    due_date: date | None = None
+    due_time: str | None = None
+    action: str | None = None
+    status: str | None = None
+    optional: bool = False
+    # A later notice may have changed this and nobody has confirmed it, so the
+    # date shown might not be the date that holds.
+    contested: bool = False
+    subject_member_id: uuid.UUID | None = None
+    subject_name: str | None = None
+    obligation_id: uuid.UUID | None = None
+    amendment_id: uuid.UUID | None = None
+    artifact_id: uuid.UUID | None = None
+
+
+class Brief(BaseModel):
+    date: date
+    member_id: uuid.UUID
+    display_name: str
+    items: list[BriefItem]
+    # Everything found, by reason -- not everything shown, so "and 4 more" can
+    # be said honestly.
+    counts: dict[str, int]
+    more: int
+
+
 class Obligation(BaseModel):
     id: uuid.UUID
     artifact_id: uuid.UUID
