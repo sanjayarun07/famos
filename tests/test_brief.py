@@ -6,7 +6,6 @@ import pytest
 
 from familyos import brief
 from familyos.settings import settings
-
 from tests.conftest import pdf
 
 TODAY = dt.date.today()

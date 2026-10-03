@@ -931,10 +931,70 @@ function wireObligationRows(container, rows, withLink) {
     b.addEventListener('click', () => decide(b.dataset.dismiss, 'dismissed')));
 }
 
+/* ── the brief ────────────────────────────────────────────────── */
+/* Worst first, and never more than a few lines: a brief that lists everything
+   is the list it was meant to replace. The server decides what matters and in
+   what order; this only draws it. */
+
+const REASON = {
+  missed: { tone: 'red', label: 'missed', glyph: '!' },
+  overdue: { tone: 'red', label: 'overdue', glyph: '!' },
+  today: { tone: 'amber', label: 'today', glyph: '\u25CF' },
+  undecided: { tone: 'amber', label: 'undecided', glyph: '?' },
+  soon: { tone: 'blue', label: 'soon', glyph: '\u2192' },
+  amendment: { tone: 'rust', label: 'may have changed', glyph: '\u21BB' },
+  quarantine: { tone: 'rust', label: 'needs vouching', glyph: '\u29B8' },
+};
+
+function greeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  return hour < 18 ? 'Good afternoon' : 'Good evening';
+}
+
+/* Each line goes where the thing is actually dealt with. */
+function briefHref(i) {
+  if (i.reason === 'amendment') return '#/revisions';
+  if (i.reason === 'quarantine') return '#/quarantine';
+  return i.artifact_id ? '#/notices/' + i.artifact_id : '#/today';
+}
+
+function briefRow(i) {
+  const r = REASON[i.reason] || { tone: '', label: i.reason, glyph: '\u00B7' };
+  return '<a class="brief-row row" href="' + briefHref(i) + '" style="gap:10px;align-items:flex-start">'
+    + '<span class="glyph ' + r.tone + '" style="width:26px;height:26px;font-size:12px;flex-shrink:0"'
+    + ' aria-hidden="true">' + r.glyph + '</span>'
+    + '<span class="grow"><span class="row wrap" style="gap:6px">'
+    + '<span style="font-size:13.5px;font-weight:600">' + esc(i.title) + '</span>'
+    + '<span class="tag ' + r.tone + '">' + esc(r.label) + '</span>'
+    + (i.optional ? '<span class="tag line">optional</span>' : '')
+    + (i.subject_name ? '<span class="tag kid">' + esc(i.subject_name) + '</span>' : '')
+    // A pending revision means the date shown may not be the date that holds.
+    + (i.contested && i.reason !== 'amendment'
+      ? '<span class="tag rust" title="A later notice looks like it changes this">may have changed</span>' : '')
+    + '</span>'
+    + '<span class="sub">' + esc(i.why) + (i.when ? ' \u00B7 ' + esc(i.when) : '') + '</span></span></a>';
+}
+
+function briefCard(b) {
+  return '<section class="card pad stack brief" style="gap:13px">'
+    + '<div class="row wrap" style="gap:10px">'
+    + '<h1 style="margin:0">' + esc(greeting()) + ', ' + esc(b.display_name) + '</h1>'
+    + '<span class="rule"></span>'
+    + '<span class="muted" style="flex-shrink:0">' + esc(date(b.date)) + '</span></div>'
+    + (b.items.length
+      ? '<div class="stack" style="gap:9px">' + b.items.map(briefRow).join('') + '</div>'
+        + (b.more ? '<span class="muted">and ' + b.more + ' more below</span>' : '')
+      : '<p class="muted">Nothing needs anyone today. A dated thing appears here before its day, and anything '
+        + 'nobody has decided appears sooner than that.</p>')
+    + '</section>';
+}
+
 /* ── today ────────────────────────────────────────────────────── */
 
 async function todayView(main) {
-  const [proposed, upcoming] = await Promise.all([
+  const [brief, proposed, upcoming] = await Promise.all([
+    api('/brief?limit=3'),
     api('/obligations?status=proposed&limit=200'),
     api('/reminders?limit=200'),
   ]);
@@ -951,7 +1011,8 @@ async function todayView(main) {
   });
 
   const TONE = { Overdue: 'red', 'This week': 'amber', Later: '', 'No date': '' };
-  main.innerHTML = '<div class="head"><div><h1>' + esc(date(new Date().toISOString())) + '</h1>'
+  main.innerHTML = briefCard(brief)
+    + '<div class="head"><div><h1>Waiting on you</h1>'
     + '<p>Proposed from notices you can see. Nothing here has been agreed to yet, and nothing here pays.</p></div>'
     + '<a class="btn ghost" href="#/notices">All notices</a></div>'
     + '<div class="split"><div>'
