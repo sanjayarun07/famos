@@ -11,7 +11,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import RedirectResponse
 
-from familyos import artifacts, audit, brief, consent, erasure, identity, reconcile, reminders
+from familyos import artifacts, audit, brief, consent, erasure, export, identity, reconcile, reminders
 from familyos.api.deps import current_member, erasure_reader
 from familyos.extraction import service as extraction
 from familyos.identity import Principal
@@ -233,6 +233,34 @@ async def decide_amendment(amendment_id: uuid.UUID, body: AmendmentDecisionIn,
                         "the member can see, so a private notice reminds nobody else.")
 async def list_reminders(limit: int = 100, p: Principal = Depends(current_member)):
     return [Reminder(**r) for r in await reminders.list_for(p, min(max(limit, 1), 500))]
+
+
+# ----------------------------------------------------------------------------
+# taking everything with you
+# ----------------------------------------------------------------------------
+
+def _zip(data: bytes, filename: str) -> Response:
+    return Response(content=data, media_type="application/zip", headers={
+        "content-disposition": f'attachment; filename="{filename}"',
+        # Built for this request and gone afterwards; nothing should cache a
+        # copy of a household on the way past.
+        "cache-control": "no-store"})
+
+
+@router.get("/export", tags=["household"], response_class=Response,
+            description="Everything the member can see, as a zip: the originals, a readable page per "
+                        "notice, and the same contents as JSON. Generated for this request and never stored.")
+async def export_mine(p: Principal = Depends(current_member)):
+    data, filename, _ = await export.for_member(p)
+    return _zip(data, filename)
+
+
+@router.get("/members/{member_id}/export", tags=["household"], response_class=Response,
+            description="What is held about one child, for a guardian. The counterpart to subject "
+                        "erasure: the same scope, handed over instead of destroyed.")
+async def export_subject(member_id: uuid.UUID, p: Principal = Depends(current_member)):
+    data, filename, _ = await export.for_subject(p, member_id)
+    return _zip(data, filename)
 
 
 # ----------------------------------------------------------------------------

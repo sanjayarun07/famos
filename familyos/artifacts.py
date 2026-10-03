@@ -37,6 +37,10 @@ class HouseholdUnavailable(Exception):
     """The household is being erased: nothing new is accepted."""
 
 
+class TooLarge(Exception):
+    """More than this request is allowed to build."""
+
+
 @dataclass
 class NewArtifact:
     data: bytes
@@ -169,6 +173,48 @@ async def read_original(p: Principal, artifact_id: uuid.UUID) -> tuple[dict, byt
 
 async def _read_bytes(p: Principal, artifact: dict) -> bytes:
     return await read_bytes(p.household_id, artifact, actor=p)
+
+
+async def read_many(household_id: uuid.UUID, artifact_rows: list[dict], *, actor: Principal | None = None,
+                    max_bytes: int | None = None) -> dict[uuid.UUID, bytes]:
+    """Several originals at once, for an export.
+
+    One connection and one key unwrap rather than one of each per artifact,
+    and -- more importantly -- **one** audit event. Reading fifty originals to
+    answer a single request for an export is one deliberate act, and fifty
+    `artifact.original_read` rows would describe it less truthfully than one
+    `artifact.originals_read` saying how many. The integrity check is the same
+    one `read_bytes` makes; an original that fails it is not quietly left out.
+
+    `max_bytes` stops before building something too large to send, rather than
+    after.
+    """
+    out: dict[uuid.UUID, bytes] = {}
+    if not artifact_rows:
+        return out
+    total = 0
+    async with pool().acquire() as conn:
+        key = await household_key(conn, household_id)
+        store = blobstore.store()
+        for artifact in artifact_rows:
+            if artifact.get("blob_id") is None:
+                continue
+            blob = await conn.fetchrow("SELECT * FROM blobs WHERE id = $1", artifact["blob_id"])
+            if blob is None:
+                continue
+            data = crypto.open_sealed(key, await store.get(blob["storage_key"]),
+                                      _aad(household_id, blob["sha256"]))
+            if sha256(data) != blob["sha256"]:
+                raise RuntimeError(f"blob {blob['id']} failed its integrity check")
+            total += len(data)
+            if max_bytes is not None and total > max_bytes:
+                raise TooLarge(f"this export would be over {max_bytes} bytes of originals")
+            out[artifact["id"]] = data
+        await audit.record(household_id, "artifact.originals_read",
+                           actor_kind="member" if actor else "system",
+                           actor_member_id=actor.member_id if actor else None,
+                           detail={"artifacts": len(out), "bytes": total}, conn=conn)
+    return out
 
 
 async def read_bytes(household_id: uuid.UUID, artifact: dict, *, actor: Principal | None = None) -> bytes:

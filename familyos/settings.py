@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Intake limits.
     max_upload_bytes: int = 25 * 1024 * 1024
     max_email_bytes: int = 30 * 1024 * 1024
+    # An export is built in memory and streamed, never stored, so this is a
+    # ceiling on one request rather than on a household.
+    max_export_bytes: int = 200 * 1024 * 1024
 
     # Forwarding email: <household inbound token>@<inbound_domain>. The mail
     # provider posts the raw message to /v1/inbound/email with this secret.

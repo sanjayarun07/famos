@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from familyos import db, erasure, jobs, reminders
 from familyos.api.routes import router
-from familyos.artifacts import HouseholdUnavailable
+from familyos.artifacts import HouseholdUnavailable, TooLarge
 from familyos.consent import ConsentRequired
 from familyos.extraction import pipeline as extraction_pipeline
 from familyos.extraction import service as extraction
@@ -100,6 +100,10 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     @app.exception_handler(Rejected)
     async def rejected(_: Request, exc: Rejected):
         return _error(exc.status, "rejected", exc.reason)
+
+    @app.exception_handler(TooLarge)
+    async def too_large(_: Request, exc: TooLarge):
+        return _error(413, "too_large", str(exc))
 
     @app.exception_handler(HouseholdUnavailable)
     async def unavailable(_: Request, exc: HouseholdUnavailable):
