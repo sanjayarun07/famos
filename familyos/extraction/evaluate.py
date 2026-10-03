@@ -217,6 +217,11 @@ def score_notice(row: dict, extraction: Extraction) -> dict:
         "actionable": {"expected": expected_actionable, "predicted": extraction.actionable},
         "expect_no_violations": expect_no_violations(row.get("expect_no") or [], extraction, obligations),
         "obligations": len(obligations),
+        # Split, because the two cost a family completely different things. A
+        # task is a decision somebody has to make; a calendar note is a date
+        # they only need to know. Counting them together hides the question of
+        # how much a single notice actually asks of anyone.
+        "obligations_by_kind": dict(Counter(o.kind for o in obligations)),
         "missed": [expected[i].get("title") or expected[i].get("text") or expected[i].get("amends")
                    for i, e in enumerate(expected) if e["kind"] in SCORED and i not in matched_i],
         "ocr_pages": extraction.ocr_pages,
@@ -236,6 +241,10 @@ def summarize(results: list[dict]) -> dict:
             fields[k][0] += a
             fields[k][1] += b
     claims = sum(r["claims"] for r in results)
+    by_kind = Counter()
+    for r in results:
+        by_kind.update(r.get("obligations_by_kind") or {})
+    obligations = sum(by_kind.values())
     act = [r["actionable"] for r in results]
     ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
     found = sum(v[0] for v in det.values())
@@ -250,6 +259,17 @@ def summarize(results: list[dict]) -> dict:
         "expect_no": [sum(1 for r in results if r["expect_no_violations"]),
                       sum(1 for r in results if r.get("has_expect_no"))],
         "grounding": [sum(r["claims_grounded"] for r in results), claims, ratio(sum(r["claims_grounded"] for r in results), claims)],
+        # What a family is actually handed. Not an accuracy measure -- a load
+        # measure, and the one an accuracy table cannot show.
+        "load": {
+            "obligations": obligations,
+            "per_notice": round(obligations / len(results), 1) if results else None,
+            "by_kind": dict(sorted(by_kind.items())),
+            "tasks_per_notice": round(by_kind.get("task", 0) / len(results), 1) if results else None,
+            "notices_over_5_decisions": sum(
+                1 for r in results if (r.get("obligations_by_kind") or {}).get("task", 0) > 5),
+            "worst": max((r["obligations"] for r in results), default=0),
+        },
     }
 
 
@@ -270,10 +290,23 @@ def render(summary: dict, results: list[dict], meta: dict) -> str:
               "Field accuracy on matched facts:", "", "| Field | Correct |", "|---|---|"]
     for k, v in summary["fields"].items():
         lines.append(f"| {k} | {pct(v)} |")
-    lines += ["", "| Notice | Found | Claims | Matched | Actionable (exp/pred) | expect_no violated |", "|---|---|---|---|---|---|"]
+    load = summary["load"]
+    lines += ["", "What one notice hands a family:", "", "| Measure | Score |", "|---|---|",
+              f"| Obligations proposed | {load['obligations']} from {summary['notices']} notices |",
+              f"| Per notice | {load['per_notice']} ({load['tasks_per_notice']} of them decisions) |",
+              f"| Notices asking for more than 5 decisions | {load['notices_over_5_decisions']} of {summary['notices']} |",
+              f"| Worst single notice | {load['worst']} |",
+              "",
+              "A task is a decision somebody has to make. A calendar note is a date they only",
+              "need to know. An accuracy table cannot show this, and it is what a family feels first."]
+
+    lines += ["", "| Notice | Found | Claims | Matched | Asks | Actionable (exp/pred) | expect_no violated |",
+              "|---|---|---|---|---|---|---|"]
     for r in results:
         found = sum(v[0] for v in r["detection"].values())
-        lines.append(f"| {r['id']} | {found}/{r['expected_scored']} | {r['claims']} | {r['claims_matched']} | "
+        kinds = r.get("obligations_by_kind") or {}
+        asks = f"{kinds.get('task', 0)} decide, {kinds.get('calendar', 0)} note"
+        lines.append(f"| {r['id']} | {found}/{r['expected_scored']} | {r['claims']} | {r['claims_matched']} | {asks} | "
                      f"{'yes' if r['actionable']['expected'] else 'no'}/{'yes' if r['actionable']['predicted'] else 'no'} | "
                      f"{', '.join(r['expect_no_violations']) or '-'} |")
     return "\n".join(lines) + "\n"
