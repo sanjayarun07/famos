@@ -1,7 +1,87 @@
-/* FamilyOS console. Paper ground, ink-blue primary, amber reserved for one
-   thing only: the words a claim was read from. */
+/* FamilyOS console.
+
+   Dark by default, because a parent opens this at 7am and at 11pm and the
+   second one matters more. Light is a choice, kept because a notice is a
+   photograph of a piece of paper and paper reads better on paper.
+
+   Every colour in this file and in app.js goes through one of these tokens --
+   there is not a single hex literal outside this block. That is what makes a
+   second theme a list of values rather than a hunt. Changing a colour here
+   changes it everywhere, including the inline styles in app.js.
+
+   Amber stays reserved for one thing in both themes: the words a claim was
+   read from. It is the only colour that means something. */
 
 :root {
+  color-scheme: dark;
+
+  --paper: #14161a;        /* the ground */
+  --card: #1b1e24;         /* raised */
+  --sunk: #171a1f;         /* recessed, inside a card */
+  --ink: #e8e6e1;          /* body text */
+  --ink-2: #b4b0a7;        /* secondary */
+  --ink-3: #8b8780;        /* muted */
+  --faint: #7d7973;        /* 3.86:1 on a card -- 6b6761 was 2.97 */
+  --line: #2b2f37;         /* borders */
+  --line-2: #3c424c;       /* a border that has to be seen */
+  --line-soft: #23262c;    /* a divider that should not be */
+
+  /* Ink-blue lifted off the wall: #1e3a5f on #14161a is unreadable, so the
+     primary becomes the light end of the same hue rather than the dark end. */
+  --primary: #7aa7dd;
+  --primary-dark: #a0c2e9;
+  --primary-tint: #1d2735;
+
+  --amber: #ffe08a;
+  --amber-line: #d9a63f;
+  --amber-tint: #2e2616;
+  --amber-ink: #f0d9a0;
+  /* Not themed: this lies on a rendered page, and a page is white in both
+     themes. Dimming it for dark would fade the highlight out of the one
+     thing it exists to point at. */
+  --amber-glow: rgba(255, 224, 138, 0.42);
+  --amber-ring: #43351a;
+
+  --green: #6fb894;
+  --green-tint: #17271f;
+  --rust: #cf8352;
+  --rust-tint: #2b1d14;
+  --red: #e08080;
+  --red-tint: #2d1a1a;
+  --red-ink: #efb4b4;
+  --red-line: #6d3b3b;
+
+  /* Text that sits on a filled shape. --on-ink is for the ink fill, which is
+     light in this theme, so it needs dark text; --on-solid is for the
+     saturated fills, which stay dark enough for light text. */
+  --on-ink: #16181c;
+  --on-solid: #0f1115;
+  --on-amber: #2c1d02;
+
+  --stage: #0f1114;        /* behind a rendered page */
+  /* A page is paper, in both themes. pdf.js paints only the page's content and
+     leaves the canvas transparent where the PDF declares no background, so
+     without this the dark stage shows through and a notice becomes black text
+     on near-black. Not themed, and not invertible: the quote highlighting
+     points at this, and inverting it would corrupt the thing being pointed
+     at. */
+  --page: #ffffff;
+  /* A code block reads as a terminal in both themes, so unlike the ink
+     fill it does not invert. */
+  --code-bg: #0f1216;
+  --code-ink: #d8d4cb;
+  --shadow: rgba(0, 0, 0, 0.5);
+  --shadow-soft: rgba(0, 0, 0, 0.35);
+
+  --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --serif: Fraunces, Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --r: 10px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
   --paper: #f7f4ed;
   --card: #ffffff;
   --sunk: #fcfaf5;
@@ -12,24 +92,40 @@
   --line: #e3ddd0;
   --line-2: #cfc7b5;
   --line-soft: #f0eadc;
+
   --primary: #1e3a5f;
   --primary-dark: #142943;
   --primary-tint: #e8eef5;
+
   --amber: #ffe08a;
   --amber-line: #e0a93c;
   --amber-tint: #fdf4e0;
   --amber-ink: #6b4a12;
+  --amber-ring: #fdf0d4;
+
   --green: #2a6047;
   --green-tint: #e4efe8;
   --rust: #8a4b1e;
   --rust-tint: #f6e9dc;
   --red: #8f2d2d;
   --red-tint: #f7e4e4;
-  --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --serif: Fraunces, Georgia, serif;
-  --mono: "IBM Plex Mono", ui-monospace, monospace;
-  --r: 10px;
+  --red-ink: #6e2222;
+  --red-line: #c99494;
+
+  --on-ink: #f2eee2;
+  --on-solid: #ffffff;
+  --on-amber: #2c1d02;
+
+  --stage: #f0ebdf;
+  --code-bg: #17150f;
+  --code-ink: #f2eee2;
+  --shadow: rgba(23, 21, 15, 0.22);
+  --shadow-soft: rgba(23, 21, 15, 0.14);
 }
+
+/* The old notice in a revision: aged, in whichever direction aged means. */
+:root { --old-tint: #211d14; --old-line: #3a3326; }
+:root[data-theme="light"] { --old-tint: #fbf6ea; --old-line: #eadfc2; }
 
 * { box-sizing: border-box; }
 
@@ -81,7 +177,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .who { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink-3); }
 .avatar {
   width: 31px; height: 31px; border-radius: 16px; flex-shrink: 0;
-  background: var(--primary); color: #fff;
+  background: var(--primary); color: var(--on-solid);
   font-size: 13px; font-weight: 600;
   display: flex; align-items: center; justify-content: center;
 }
@@ -106,7 +202,7 @@ main { padding: 26px 22px 64px; max-width: 1480px; margin: 0 auto; }
 
 .btn {
   padding: 9px 14px; border-radius: 7px; font-size: 13px; font-weight: 500;
-  border: 1px solid var(--primary); background: var(--primary); color: #fff;
+  border: 1px solid var(--primary); background: var(--primary); color: var(--on-solid);
 }
 .btn:hover:not(:disabled) { background: var(--primary-dark); border-color: var(--primary-dark); }
 .btn.ghost { border-color: var(--line-2); background: var(--card); color: var(--ink); }
@@ -120,7 +216,7 @@ main { padding: 26px 22px 64px; max-width: 1480px; margin: 0 auto; }
   padding: 6px 12px; border-radius: 20px; font-size: 12.5px;
   border: 1px solid var(--line-2); background: var(--card); color: var(--ink-2);
 }
-.pill[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; font-weight: 500; }
+.pill[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--on-ink); font-weight: 500; }
 
 .tag {
   padding: 2px 8px; border-radius: 4px; font-size: 10.5px; font-weight: 700;
@@ -132,13 +228,13 @@ main { padding: 26px 22px 64px; max-width: 1480px; margin: 0 auto; }
 .tag.green { background: var(--green-tint); color: var(--green); }
 .tag.rust { background: var(--rust-tint); color: var(--rust); }
 .tag.red { background: var(--red-tint); color: var(--red); }
-.tag.solid { background: var(--ink); color: #fff; }
+.tag.solid { background: var(--ink); color: var(--on-ink); }
 .tag.line { background: transparent; border: 1px solid var(--line-2); color: var(--ink-2); font-weight: 500; }
 .tag.kid { border-radius: 10px; text-transform: none; letter-spacing: 0; background: var(--green-tint); color: var(--green); font-weight: 600; }
 
 .count {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
-  background: var(--rust); color: #fff; font-size: 11px; font-weight: 600;
+  background: var(--rust); color: var(--on-solid); font-size: 11px; font-weight: 600;
   display: inline-flex; align-items: center; justify-content: center;
 }
 
@@ -172,8 +268,8 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
 .flash {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60;
   max-width: 560px; padding: 12px 16px; border-radius: 9px;
-  background: var(--ink); color: #fff; font-size: 13px;
-  box-shadow: 0 6px 24px rgba(23, 21, 15, 0.22);
+  background: var(--ink); color: var(--on-ink); font-size: 13px;
+  box-shadow: 0 6px 24px var(--shadow);
 }
 .flash.bad { background: var(--red); }
 
@@ -218,16 +314,16 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
   font-size: 11.5px; color: var(--ink-3);
 }
 .viewer header b { font-size: 12px; color: var(--ink); }
-.stage { padding: 20px; background: #f0ebdf; min-height: 320px; display: flex; flex-direction: column; gap: 16px; align-items: center; }
-.page-wrap { position: relative; line-height: 0; box-shadow: 0 1px 4px rgba(23, 21, 15, 0.14); max-width: 100%; }
-.page-wrap canvas, .page-wrap img { display: block; max-width: 100%; height: auto; }
+.stage { padding: 20px; background: var(--stage); min-height: 320px; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+.page-wrap { position: relative; line-height: 0; box-shadow: 0 1px 4px var(--shadow-soft); max-width: 100%; }
+.page-wrap canvas, .page-wrap img { display: block; max-width: 100%; height: auto; background: var(--page); }
 .box {
   position: absolute; border-radius: 2px;
-  background: rgba(255, 224, 138, 0.42);
+  background: var(--amber-glow);
   box-shadow: inset 0 0 0 1.5px var(--amber-line);
   pointer-events: none;
 }
-.stage object, .stage iframe { width: 100%; height: 620px; border: 0; background: #fff; }
+.stage object, .stage iframe { width: 100%; height: 620px; border: 0; background: var(--card); }
 .stage .note { font-size: 12px; color: var(--ink-2); text-align: center; max-width: 440px; line-height: 1.5; }
 
 .claim {
@@ -236,14 +332,14 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
   background: var(--card); border: 1px solid var(--line);
 }
 .claim:hover { border-color: var(--line-2); }
-.claim[aria-pressed="true"] { border-color: var(--amber-line); box-shadow: 0 0 0 3px #fdf0d4; }
+.claim[aria-pressed="true"] { border-color: var(--amber-line); box-shadow: 0 0 0 3px var(--amber-ring); }
 .claim .n {
   width: 22px; height: 22px; flex-shrink: 0; border-radius: 11px;
   background: var(--line-soft); color: var(--ink-2);
   font-size: 11.5px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
 }
-.claim[aria-pressed="true"] .n { background: var(--amber-line); color: #2c1d02; }
+.claim[aria-pressed="true"] .n { background: var(--amber-line); color: var(--on-amber); }
 .claim .quote {
   font-size: 11.5px; line-height: 1.45; color: var(--ink-2); font-style: italic;
   padding: 7px 9px; background: var(--sunk); border-radius: 6px;
@@ -275,7 +371,7 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
 
 /* ── revisions ───────────────────────────────────────────────── */
 
-.count.amber { background: var(--amber-line); color: #2c1d02; }
+.count.amber { background: var(--amber-line); color: var(--on-amber); }
 
 .revision {
   display: grid;
@@ -297,7 +393,7 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
   flex-direction: column;
   gap: 6px;
 }
-.revision .side.old { background: #fbf6ea; border-color: #eadfc2; }
+.revision .side.old { background: var(--old-tint); border-color: var(--old-line); }
 
 .revision .label {
   font-size: 10.5px;
@@ -381,8 +477,8 @@ textarea[name="text"] {
   margin: 0;
   padding: 12px 14px;
   border-radius: 8px;
-  background: var(--ink);
-  color: #f2eee2;
+  background: var(--code-bg);
+  color: var(--code-ink);
   font: 400 11.5px/1.7 var(--mono);
   overflow-x: auto;
   white-space: pre;

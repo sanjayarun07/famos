@@ -8,6 +8,17 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="app.css">
+<script>
+/* Before the stylesheet paints, or a light-theme viewer sees a dark flash on
+   every load. Dark is the default, so only a stored "light" does anything.
+   Wrapped because localStorage throws in a private window, and a theme is not
+   worth failing a page load over. */
+try {
+  if (localStorage.getItem('familyos.theme') === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+} catch (e) { /* default stands */ }
+</script>
 </head>
 <body>
 <div id="root" class="boot">Loading&hellip;</div>

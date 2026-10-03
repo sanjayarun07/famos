@@ -72,3 +72,32 @@ and many apps that block payment will still let you read.
 
 Use throwaway test accounts, one per app. Never a real family's credentials,
 and never a parent's account.
+
+## `contrast.py` — do the themes hold?
+
+The console is dark by default with a light alternative, and every colour in
+`app.css` and `app.js` goes through a token — there is not one hex literal
+outside the two palette blocks. That is what makes a second theme a list of
+values rather than a hunt.
+
+It is also what makes it checkable. This computes the WCAG contrast ratio for
+every text-on-background pair the console actually uses, in both themes, and
+fails if any falls below its floor (4.5:1 for text, 3:1 for faint).
+
+```sh
+python tools/contrast.py
+```
+
+A dark theme is easy to write and easy to get wrong in a way that only shows
+up on somebody else's screen, which is the part a screenshot would not tell
+you anyway. It caught `--faint` at 2.97:1 on a card.
+
+Two values are deliberately **not** themed, and the tool prints them so the
+exception stays visible:
+
+- `--page` is white in both themes. A notice is a photograph of paper, and
+  pdf.js paints only the page's content — it leaves the canvas transparent
+  where the PDF declares no background, so without a white page the dark
+  stage shows through and a notice becomes black text on near-black.
+- `--amber-glow`, the quote highlight, lies on that page. Dimming it for dark
+  would fade the highlight out of the one thing it exists to point at.

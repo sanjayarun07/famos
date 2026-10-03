@@ -133,6 +133,24 @@ function membersByRole(roles) {
   return (store.household.members || []).filter((m) => roles.indexOf(m.role) !== -1);
 }
 
+/* ── theme ────────────────────────────────────────────────────── */
+/* Dark by default. The choice is per browser and never leaves it: it is a
+   convenience, not household data, so it has no business in the database. */
+
+const THEME_KEY = 'familyos.theme';
+
+function theme() {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+}
+
+function setTheme(next) {
+  if (next === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  // May throw in a private window, and the theme still applied, so this is
+  // the last thing done and its failure changes nothing on screen.
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* this session only */ }
+}
+
 /* ── routing ──────────────────────────────────────────────────── */
 
 const ROUTES = [
@@ -195,6 +213,10 @@ function chrome(active) {
     + '</nav>'
     + '<div class="who"><span>' + esc(store.me ? store.me.display_name : '') + '</span>'
     + '<span class="avatar">' + esc(initial(store.me && store.me.display_name)) + '</span>'
+    + '<button class="icon-btn" data-theme-toggle title="'
+    + (theme() === 'dark' ? 'Switch to light' : 'Switch to dark')
+    + '" aria-label="' + (theme() === 'dark' ? 'Switch to light' : 'Switch to dark') + '">'
+    + (theme() === 'dark' ? '\u25D1' : '\u25D0') + '</button>'
     + '<button class="btn ghost sm" data-signout>Sign out</button></div>'
     + '</header>';
 }
@@ -202,6 +224,13 @@ function chrome(active) {
 function wireChrome() {
   const btn = root.querySelector('[data-signout]');
   if (btn) btn.addEventListener('click', () => { signOut().catch(() => forget()); });
+  const swap = root.querySelector('[data-theme-toggle]');
+  if (swap) swap.addEventListener('click', async () => {
+    setTheme(theme() === 'dark' ? 'light' : 'dark');
+    // Re-rendered rather than just restyled: a rendered PDF page is drawn to a
+    // canvas, so its backdrop does not follow a CSS variable on its own.
+    await render();
+  });
 }
 
 function forget() {
@@ -839,7 +868,7 @@ async function renderOriginal(viewer, artifact) {
 
   if (artifact.media_type.startsWith('text/') || artifact.media_type === 'message/rfc822') {
     const text = await blob.text();
-    stage.innerHTML = '<pre style="margin:0;width:100%;max-height:620px;overflow:auto;background:#fff;'
+    stage.innerHTML = '<pre style="margin:0;width:100%;max-height:620px;overflow:auto;background:var(--card);'
       + 'padding:18px;border-radius:6px;font:400 12px/1.6 var(--mono);white-space:pre-wrap">'
       + esc(text.slice(0, 200000)) + '</pre>';
     return;
@@ -1494,7 +1523,7 @@ async function householdView(main) {
     + '<span class="muted">DPDP Act 2023, s.9 · kept as evidence even after it ends</span></div>'
     + (children.length ? '<div class="stack" style="gap:8px" data-crows></div>'
       : '<p class="muted">No children in this household yet.</p>')
-    + '<p class="muted" style="padding:11px 13px;background:var(--red-tint);border-radius:7px;color:#6e2222;line-height:1.55">'
+    + '<p class="muted" style="padding:11px 13px;background:var(--red-tint);border-radius:7px;color:var(--red-ink);line-height:1.55">'
     + 'Withdrawing consent starts an erasure in the same transaction. Every notice naming that child goes, along with '
     + 'anything read from it. The consent record itself stays, as proof it existed and ended.</p>';
 
@@ -1549,7 +1578,7 @@ function sessionsCard(sessions) {
 }
 
 function dangerCard(household) {
-  return '<div class="card pad stack" style="gap:9px;border-color:#c99494">'
+  return '<div class="card pad stack" style="gap:9px;border-color:var(--red-line)">'
     + '<h3 style="color:var(--red)">Erase everything</h3>'
     + '<p class="muted" style="line-height:1.55">Sign-in and intake stop at once. The household key is destroyed first, so '
     + 'every copy of your originals — backups included — is unreadable before a single file is deleted.</p>'
