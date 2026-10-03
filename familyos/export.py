@@ -36,7 +36,7 @@ import re
 import uuid
 import zipfile
 
-from familyos import artifacts, audit
+from familyos import artifacts, audit, consent
 from familyos.db import pool
 from familyos.identity import NotAllowed, NotFound, Principal
 from familyos.settings import settings
@@ -384,12 +384,21 @@ async def for_subject(p: Principal, member_id: uuid.UUID) -> tuple[bytes, str, d
         # Named as the subject of a notice, or named inside a claim read out of
         # one. Both are "about this child", and the second is the one a family
         # would not think to look for.
+        #
+        # The name test is `consent.names_match`, the same one erasure uses --
+        # not string equality. A claim naming "Meera" is within reach of
+        # erasing "Meera Sharma", so it has to be within reach of exporting
+        # her too. Any gap between those two scopes means handing over less
+        # than will be destroyed, which is the wrong direction to be wrong in.
+        named_ids = {r["artifact_id"] for r in await conn.fetch(
+            "SELECT DISTINCT artifact_id, subject_name FROM claims "
+            "WHERE household_id = $1 AND subject_name IS NOT NULL", p.household_id)
+            if consent.names_match(r["subject_name"], subject["display_name"])}
         notices = [dict(r) for r in await conn.fetch(
-            "SELECT DISTINCT a.* FROM input_artifacts a WHERE a.household_id = $1 AND ("
+            "SELECT a.* FROM input_artifacts a WHERE a.household_id = $1 AND ("
             "  EXISTS (SELECT 1 FROM artifact_subjects s WHERE s.artifact_id = a.id AND s.member_id = $2)"
-            "  OR EXISTS (SELECT 1 FROM claims c WHERE c.artifact_id = a.id AND c.subject_name IS NOT NULL"
-            "             AND c.subject_name = $3)) ORDER BY a.received_at",
-            p.household_id, member_id, subject["display_name"])]
+            "  OR a.id = ANY($3::uuid[])) ORDER BY a.received_at",
+            p.household_id, member_id, list(named_ids))]
         ids = [a["id"] for a in notices]
         claims = [dict(r) for r in await conn.fetch(
             "SELECT c.* FROM claims c JOIN extractions e ON e.id = c.extraction_id "

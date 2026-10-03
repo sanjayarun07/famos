@@ -19,6 +19,7 @@ const store = {
   token: null,
   me: null,
   household: null,
+  mailboxes: [],
   quarantineCount: 0,
   amendmentCount: 0,
 };
@@ -144,9 +145,14 @@ const ROUTES = [
   { path: /^\/audit$/, view: auditView, nav: 'audit' },
 ];
 
+/* The Google callback comes back to #/household?mailbox=connected, so a path
+   has to survive having a query on it. */
 function here() {
-  const raw = location.hash.replace(/^#/, '');
+  const raw = location.hash.replace(/^#/, '').split('?')[0];
   return raw || '/notices';
+}
+function hashQuery() {
+  return new URLSearchParams(location.hash.replace(/^#/, '').split('?')[1] || '');
 }
 function go(path) { location.hash = path; }
 
@@ -315,14 +321,21 @@ const CHANNEL = {
 };
 
 async function noticesView(main) {
-  const items = await api('/artifacts?limit=100');
+  const [items, mailboxes] = await Promise.all([
+    api('/artifacts?limit=100'),
+    // Only so Ways in can say whether a mailbox is connected.
+    api('/google/mailboxes').catch(() => []),
+  ]);
+  store.mailboxes = mailboxes;
   main.innerHTML = '<div class="head"><div><h1>Notices</h1>'
     + '<p>Everything that arrived, kept exactly as it came. You see what is shared with the household, and what you sent yourself.</p></div>'
-    + '<button class="btn" data-add>Add a notice</button></div>'
+    + '<div class="row" style="gap:8px"><button class="btn ghost" data-reportgap>Something missing?</button>'
+    + '<button class="btn" data-add>Add a notice</button></div></div>'
     + inboundCard()
     + '<div style="height:14px"></div>'
     + '<div class="card" data-list></div>'
-    + uploadDialog();
+    + uploadDialog()
+    + gapDialog();
 
   const list = main.querySelector('[data-list]');
   if (!items.length) {
@@ -333,9 +346,9 @@ async function noticesView(main) {
   }
 
   const dlg = main.querySelector('dialog');
-  main.querySelector('[data-add]').addEventListener('click', () => dlg.showModal());
   wireUpload(dlg);
   wireWays(main, dlg);
+  wireGaps(main);
 }
 
 function wireWays(main, dlg) {
@@ -345,8 +358,11 @@ function wireWays(main, dlg) {
       flash('Copied.');
     } catch (e) { flash('Could not reach the clipboard.', true); }
   }));
-  const add = main.querySelector('[data-add]');
-  if (add && dlg) add.addEventListener('click', () => dlg.showModal());
+  // Every one of them: there is a button in the head and another inside the
+  // Ways in card, and querySelector only ever found the first. On a page with
+  // no upload dialog it goes to the page that has one.
+  main.querySelectorAll('[data-add]').forEach((add) => add.addEventListener(
+    'click', () => (dlg ? dlg.showModal() : go('/notices'))));
   const how = main.querySelector('[data-shortcut]');
   if (how) how.addEventListener('click', () => shortcutHelp(main));
 }
@@ -415,6 +431,18 @@ function inboundCard() {
       hint: 'Mail from a member whose provider vouched for it is accepted; anything else waits in quarantine.',
     },
     {
+      key: 'gmail',
+      live: ((store.mailboxes || []).some((m) => !m.needs_reconnect)),
+      glyph: '\u25D4',
+      tone: 'blue',
+      title: 'Connect your Gmail',
+      what: 'Read-only, and only mail that looks like a school notice. Nothing is sent or changed.',
+      value: '',
+      hint: ((store.mailboxes || []).some((m) => m.needs_reconnect))
+        ? 'A connected mailbox has stopped being readable \u2014 reconnect it on the Household page.'
+        : 'Removes the step where somebody has to notice a notice and forward it.',
+    },
+    {
       key: 'phone',
       live: true,
       glyph: '\u2191',
@@ -447,6 +475,8 @@ function inboundCard() {
         ? '<button class="btn sm" data-add style="align-self:flex-start">Add a notice</button>' : '')
       + (w.key === 'phone'
         ? '<button class="btn ghost sm" data-shortcut style="align-self:flex-start">How</button>' : '')
+      + (w.key === 'gmail'
+        ? '<a class="btn ghost sm" href="#/household" style="align-self:flex-start">Set up</a>' : '')
       + '<p class="muted" style="line-height:1.45">' + esc(w.hint) + '</p>'
       + '</div>').join('')
     + '</div></section>';
@@ -1231,11 +1261,195 @@ function amendmentCard(a) {
 
 /* ── household ────────────────────────────────────────────────── */
 
+/* ── connected mailboxes, export, and what did not arrive ─────── */
+
+function mailboxesCard(mailboxes) {
+  const rows = mailboxes.map((m) => '<div class="row" style="gap:10px;padding:9px 11px;background:var(--sunk);'
+    + 'border:1px solid var(--line-soft);border-radius:7px">'
+    + '<span class="grow"><span style="font-size:12.5px;font-weight:600">' + esc(m.email) + '</span>'
+    + '<span class="sub">' + (m.needs_reconnect
+      ? 'Not being read — Google will not refresh this any more.'
+      : 'connected ' + esc(ago(m.connected_at))
+        + (m.last_polled_at ? '  ·  last read ' + esc(ago(m.last_polled_at)) : '  ·  not read yet')
+        + (m.backfill_done ? '' : '  ·  still catching up')
+        // The brief says a mailbox has gone quiet; this is where it says why.
+        + (m.last_error ? '  ·  ' + esc(m.last_error) : '')) + '</span></span>'
+    + (m.needs_reconnect ? '<span class="tag red">reconnect</span>'
+      : m.last_error ? '<span class="tag amber">stalled</span>'
+      : '<span class="tag green">reading</span>')
+    + '<button class="btn ghost sm" data-disconnect="' + esc(m.id) + '">Disconnect</button>'
+    + '</div>').join('');
+
+  return '<div class="card pad stack" style="gap:10px">'
+    + '<div class="row wrap" style="gap:8px"><h2>Connected mailboxes</h2>'
+    + '<span class="muted">read-only</span></div>'
+    + '<p class="muted" style="line-height:1.55">FamilyOS asks for one permission, <b>gmail.readonly</b>, and reads '
+    + 'only mail that looks like a school notice. It cannot send, change or label anything. The token is sealed with '
+    + 'your household key, so erasing the household also ends this.</p>'
+    + (rows || '<p class="muted">Nothing connected. Forwarding keeps working either way.</p>')
+    + '<button class="btn sm" data-connectmail style="align-self:flex-start">Connect a Gmail account</button>'
+    + '<p class="muted" style="line-height:1.45">While FamilyOS is in testing with Google, a connection lasts seven '
+    + 'days and then asks to be reconnected. Your brief says so when it happens, rather than quietly reading nothing.</p>'
+    + '</div>';
+}
+
+function exportCard() {
+  return '<div class="card pad stack" style="gap:9px">'
+    + '<h3>Take everything with you</h3>'
+    + '<p class="muted" style="line-height:1.55">Every notice you can see, exactly as it arrived, with a page for each '
+    + 'one saying what was read out of it and the words it came from — plus the same contents as JSON. Built for '
+    + 'the download and never stored.</p>'
+    + '<button class="btn ghost" data-export>Download everything</button>'
+    + '</div>';
+}
+
+const WHERE_LABEL = {
+  email: 'Email we did not match',
+  whatsapp_group: 'A WhatsApp group',
+  whatsapp_direct: 'A WhatsApp message',
+  school_portal: 'The school portal',
+  school_app: 'The school app',
+  other_app: 'Another app',
+  sms: 'A text message',
+  paper: 'On paper',
+  word_of_mouth: 'Somebody told us',
+  unknown: 'We are not sure',
+};
+
+function gapsCard(summary, gaps) {
+  const rate = summary.capture_rate === null || summary.capture_rate === undefined
+    ? '—' : Math.round(summary.capture_rate * 100) + '%';
+  const bars = summary.missed_by_where.map((w) =>
+    '<div class="row" style="gap:10px;align-items:flex-start">'
+    + '<span class="lead" aria-hidden="true">' + w.count + '</span>'
+    + '<span class="grow"><span style="font-size:12.5px;font-weight:600">'
+    + esc(WHERE_LABEL[w.lived_where] || w.lived_where) + '</span>'
+    + '<span class="sub">' + esc(w.means)
+    + (w.with_a_date ? '  ·  ' + w.with_a_date + ' asked for something by a date' : '')
+    + (w.arrived_later ? '  ·  ' + w.arrived_later + ' turned up later' : '') + '</span></span></div>').join('');
+
+  return '<div class="card pad stack" style="gap:11px">'
+    + '<div class="row wrap" style="gap:8px"><h2>What did not arrive</h2>'
+    + '<span class="muted">' + summary.captured + ' in, ' + summary.missed_reported + ' missed</span></div>'
+    + '<p class="muted" style="line-height:1.55">Capture <b style="color:var(--ink)">' + rate + '</b>. '
+    + esc(summary.caveat) + '</p>'
+    + (bars ? '<div class="stack" style="gap:9px">' + bars + '</div>'
+      : '<p class="muted">Nothing reported missing. If something never reaches here, say so — where it '
+        + 'actually lived is what decides what gets built next.</p>')
+    + '<button class="btn ghost sm" data-reportgap style="align-self:flex-start">Report a missed notice</button>'
+    + (gaps.length
+      ? '<details><summary class="muted" style="cursor:pointer;font-size:12px">' + gaps.length
+        + ' report' + (gaps.length === 1 ? '' : 's') + '</summary><div class="stack" style="gap:6px;padding-top:9px">'
+        + gaps.map((g) => '<div class="row" style="gap:8px">'
+          + '<span class="grow"><span style="font-size:12.5px">' + esc(g.title) + '</span>'
+          + '<span class="sub">' + esc(WHERE_LABEL[g.lived_where] || g.lived_where)
+          + '  ·  ' + esc(memberName(g.reported_by) || 'a member')
+          + '  ·  ' + esc(ago(g.created_at)) + '</span></span>'
+          + (g.arrived_as ? '<span class="tag green">turned up</span>' : '') + '</div>').join('')
+        + '</div></details>'
+      : '')
+    + '</div>';
+}
+
+function gapDialog() {
+  const options = Object.keys(WHERE_LABEL)
+    .map((k) => '<option value="' + k + '">' + esc(WHERE_LABEL[k]) + '</option>').join('');
+  return '<dialog class="card" data-gap style="max-width:460px;padding:20px;border:1px solid var(--line)">'
+    + '<form class="stack" data-form="gap"><h2>Something never reached here</h2>'
+    + '<p class="muted" style="line-height:1.55">This is counted, not read: it never becomes a task or a date, '
+    + 'because what you type here is from memory and FamilyOS only records what it can point at in a document. '
+    + 'Where it lived is the useful part.</p>'
+    + '<label>What was it?<input type="text" name="title" required maxlength="300" '
+    + 'placeholder="The swimming letter"></label>'
+    + '<label>Where did it actually live?<select name="lived_where">' + options + '</select></label>'
+    + '<label>Was it emailed as well?<select name="also_emailed">'
+    + '<option value="">Not sure</option><option value="no">No</option><option value="yes">Yes</option>'
+    + '</select></label>'
+    + '<label class="row" style="gap:8px;align-items:center"><input type="checkbox" name="had_date" '
+    + 'style="width:auto">It asked for something by a date</label>'
+    + '<label>When did you find out? (optional)<input type="date" name="noticed_on"></label>'
+    + '<div class="row" style="justify-content:flex-end"><button class="btn ghost" type="button" data-close-gap>Cancel</button>'
+    + '<button class="btn" type="submit">Report it</button></div></form></dialog>';
+}
+
+async function download(path, fallbackName) {
+  flash('Building it…');
+  const blob = await api(path, { blob: true });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoked straight away: the whole household is in that blob.
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  flash('Downloaded.');
+}
+
+function wireConnections(main) {
+  const connect = main.querySelector('[data-connectmail]');
+  if (connect) connect.addEventListener('click', async () => {
+    try {
+      const begun = await api('/google/mailboxes/authorize', { method: 'POST' });
+      // Same tab: Google sends them back to the callback, which returns here.
+      location.href = begun.url;
+    } catch (err) { fail(err); }
+  });
+
+  main.querySelectorAll('[data-disconnect]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Stop reading this mailbox? The stored token is overwritten and Google is told.')) return;
+    try {
+      await api('/google/mailboxes/' + b.dataset.disconnect + '/disconnect', { method: 'POST' });
+      flash('Disconnected.');
+      await render();
+    } catch (err) { fail(err); }
+  }));
+
+  const exp = main.querySelector('[data-export]');
+  if (exp) exp.addEventListener('click', async () => {
+    try {
+      await download('/export', 'familyos-export.zip');
+    } catch (err) { fail(err); }
+  });
+}
+
+function wireGaps(main) {
+  const dlg = main.querySelector('dialog[data-gap]');
+  if (!dlg) return;
+  main.querySelectorAll('[data-reportgap]').forEach((b) =>
+    b.addEventListener('click', () => dlg.showModal()));
+  dlg.querySelector('[data-close-gap]').addEventListener('click', () => dlg.close());
+  dlg.querySelector('form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const also = f.get('also_emailed');
+    const body = {
+      title: f.get('title'),
+      lived_where: f.get('lived_where'),
+      had_date: f.get('had_date') === 'on',
+    };
+    if (also) body.also_emailed = also === 'yes';
+    if (f.get('noticed_on')) body.noticed_on = f.get('noticed_on');
+    try {
+      await api('/intake-gaps', { method: 'POST', json: body });
+      dlg.close();
+      ev.target.reset();
+      flash('Logged. Where it lived is what decides what gets built next.');
+      await render();
+    } catch (err) { fail(err); }
+  });
+}
+
+/* ── household ────────────────────────────────────────────────── */
+
 async function householdView(main) {
-  const [household, consents, mySessions] = await Promise.all([
+  const [household, consents, mySessions, mailboxes, summary, gaps] = await Promise.all([
     api('/household'), api('/consents'), api('/sessions'),
+    api('/google/mailboxes'), api('/intake-gaps/summary'), api('/intake-gaps'),
   ]);
   store.household = household;
+  store.mailboxes = mailboxes;
   const isGuardian = store.me.role === 'guardian';
   const children = (household.members || []).filter((m) => m.role === 'child');
   const active = (id) => consents.find((c) => c.subject_member_id === id && !c.withdrawn_at);
@@ -1247,11 +1461,14 @@ async function householdView(main) {
     + '<div class="card list" data-members></div>'
     + '<div class="card pad stack" data-consent></div>'
     + '</div><div class="stack">'
-    + inboundCard()
+    + mailboxesCard(mailboxes)
+    + gapsCard(summary, gaps)
     + sessionsCard(mySessions)
+    + exportCard()
     + (isGuardian ? dangerCard(household) : '')
     + '</div></div>'
-    + memberDialog();
+    + memberDialog()
+    + gapDialog();
 
   main.querySelector('[data-members]').innerHTML = (household.members || []).map((m) => {
     const tone = m.role === 'guardian' ? 'blue' : m.role === 'child' ? 'green' : '';
@@ -1300,7 +1517,18 @@ async function householdView(main) {
   }
 
   wireHousehold(main, household);
-  wireWays(main, null);
+  wireConnections(main);
+  wireGaps(main);
+
+  // The Google callback returns to #/household?mailbox=..., which is the only
+  // place the result of leaving the app can be reported.
+  const said = hashQuery().get('mailbox');
+  if (said) {
+    history.replaceState(null, '', '#/household');
+    if (said === 'connected') flash('Mailbox connected. School mail in it will start arriving.');
+    else if (said === 'cancelled') flash('Not connected \u2014 nothing was shared.');
+    else flash('That did not connect. Nothing was stored; try again.', true);
+  }
 }
 
 function sessionsCard(sessions) {

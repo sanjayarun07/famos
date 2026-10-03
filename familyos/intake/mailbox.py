@@ -43,6 +43,12 @@ HANDLER_VERSION = "1"
 # always start again, and a stale state row is a replay waiting to happen.
 STATE_TTL = dt.timedelta(minutes=10)
 
+# A connection that has not managed a clean pass in this long has gone quiet,
+# whatever the reason -- a dead token, a message it cannot get past, a poller
+# that is not running. The cause differs; the symptom a family cares about is
+# the same, and it is the one worth telling them about.
+QUIET_AFTER = dt.timedelta(hours=24)
+
 
 class NotConfigured(RuntimeError):
     """No OAuth client. Connecting is impossible until one exists, and saying
@@ -180,6 +186,18 @@ async def list_for(p: Principal) -> list[dict]:
     return [_public(r) for r in rows]
 
 
+def is_quiet(account: dict, *, now: dt.datetime | None = None) -> bool:
+    """Is this mailbox not being read? Asked of the shape _public returns, so
+    the brief and the console agree on the answer."""
+    if account.get("disconnected_at"):
+        return False
+    if account.get("needs_reconnect"):
+        return True
+    now = now or dt.datetime.now(dt.UTC)
+    last = account.get("last_polled_at") or account.get("connected_at")
+    return bool(last and now - last > QUIET_AFTER)
+
+
 def _public(row) -> dict:
     """Everything but the token. There is no endpoint, for anybody, that
     returns the token."""
@@ -240,7 +258,7 @@ async def poll(account_id: uuid.UUID, *, now: dt.datetime | None = None, transpo
         token.access_token, query=query, limit=max(1, settings.gmail_max_per_poll),
         page_token=row["backfill_cursor"] if not row["backfill_done"] else None, transport=transport)
 
-    stored = duplicates = failed = 0
+    stored = duplicates = refused = failed = 0
     for summary in found:
         try:
             raw = await google.get_raw(token.access_token, summary.message_id, transport=transport)
@@ -248,29 +266,47 @@ async def poll(account_id: uuid.UUID, *, now: dt.datetime | None = None, transpo
                 row["household_id"], row["member_id"], raw,
                 gmail_id=summary.message_id, thread_id=summary.thread_id)
         except gateway.Rejected as exc:
-            # Too large, or nothing readable in it. Counted, not retried: the
-            # next poll would reject it again.
+            # Permanent: too large, or nothing readable in it. The next poll
+            # would refuse it identically, so it is counted and stepped past.
             logger.info("gmail message %s not taken: %s", summary.message_id, exc.reason)
-            failed += 1
+            refused += 1
         except google.GoogleError:
             raise
         except Exception:
+            # Storage, the database, a bug: as far as anything here can tell,
+            # this might work next time. So it is NOT stepped past.
             logger.warning("gmail message %s could not be stored", summary.message_id, exc_info=True)
             failed += 1
         else:
             duplicates += 1 if duplicate else 0
             stored += 0 if duplicate else 1
 
-    # The first pass walks pages until Gmail runs out; after that each poll
-    # asks only for what is new, so the cursor is finished with.
+    # Only move the cursor when nothing might still be retrievable. Advancing
+    # over a transient failure loses the notice silently and for good -- the
+    # backfill never returns to a page it has left, and the incremental window
+    # closes behind it. Re-reading a page costs nothing, because a Gmail id
+    # already stored is refused as a duplicate.
+    #
+    # The cost of that choice is that a message which fails for ever stalls
+    # this mailbox. That is deliberate: a stalled mailbox says so in
+    # last_error and in the brief, and a silently lossy one says nothing at
+    # all. Of the two, only one can be noticed and fixed.
+    stalled = failed > 0
     async with pool().acquire() as conn:
-        await conn.execute(
-            "UPDATE google_accounts SET last_polled_at = $2, last_error = NULL, "
-            "backfill_cursor = $3, backfill_done = $4 WHERE id = $1",
-            account_id, now, next_page if not row["backfill_done"] else None,
-            row["backfill_done"] or next_page is None)
+        if stalled:
+            await conn.execute(
+                "UPDATE google_accounts SET last_error = $2 WHERE id = $1", account_id,
+                f"{failed} message(s) could not be stored; not moving on until they can"[:500])
+        else:
+            # The first pass walks pages until Gmail runs out; after that each
+            # poll asks only for what is new, so the cursor is finished with.
+            await conn.execute(
+                "UPDATE google_accounts SET last_polled_at = $2, last_error = NULL, "
+                "backfill_cursor = $3, backfill_done = $4 WHERE id = $1",
+                account_id, now, next_page if not row["backfill_done"] else None,
+                row["backfill_done"] or next_page is None)
     return {"email": row["email"], "looked_at": len(found), "stored": stored,
-            "duplicates": duplicates, "failed": failed,
+            "duplicates": duplicates, "refused": refused, "failed": failed, "stalled": stalled,
             "backfilling": not (row["backfill_done"] or next_page is None)}
 
 
@@ -300,7 +336,7 @@ async def due(limit: int = 50, *, now: dt.datetime | None = None) -> list[uuid.U
 
 async def sweep(*, now: dt.datetime | None = None, transport=None) -> dict:
     now = now or dt.datetime.now(dt.UTC)
-    totals = {"mailboxes": 0, "stored": 0, "duplicates": 0, "failed": 0}
+    totals = {"mailboxes": 0, "stored": 0, "duplicates": 0, "refused": 0, "failed": 0, "stalled": 0}
     for account_id in await due(now=now):
         totals["mailboxes"] += 1
         try:
@@ -313,8 +349,9 @@ async def sweep(*, now: dt.datetime | None = None, transport=None) -> dict:
                 await conn.execute("UPDATE google_accounts SET last_error = $2 WHERE id = $1",
                                    account_id, str(exc)[:500])
             continue
-        for field in ("stored", "duplicates", "failed"):
+        for field in ("stored", "duplicates", "refused", "failed"):
             totals[field] += result.get(field, 0)
+        totals["stalled"] += 1 if result.get("stalled") else 0
     return totals
 
 

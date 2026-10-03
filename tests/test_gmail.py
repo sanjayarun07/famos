@@ -347,3 +347,93 @@ async def test_the_poll_interval_is_respected_once_the_backfill_is_done(family, 
     # Just polled, so not due again yet.
     assert await mailbox.due() == []
     assert account["id"] in await mailbox.due(now=dt.datetime.now(dt.UTC) + dt.timedelta(seconds=301))
+
+
+# ----------------------------------------------------------------------------
+# not losing one
+# ----------------------------------------------------------------------------
+
+async def test_a_message_that_might_store_later_is_not_stepped_past(family, database, monkeypatch):
+    """The cursor used to move whatever happened, so one transient storage
+    failure lost a notice for good: the backfill never returns to a page it
+    has left, and the incremental window closes behind it."""
+    fake = FakeGoogle(messages={"m1": _raw(), "m2": _raw(subject="Fees")})
+    account = await _connect(family, fake)
+
+    real = mailbox.gateway.receive_gmail
+    hit = {"n": 0}
+
+    async def flaky(*a, **kw):
+        hit["n"] += 1
+        if kw.get("gmail_id") == "m2" and hit["n"] < 3:
+            raise RuntimeError("the object store blinked")
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(mailbox.gateway, "receive_gmail", flaky)
+    first = await mailbox.poll(account["id"], transport=fake)
+    assert first["stored"] == 1 and first["failed"] == 1 and first["stalled"] is True
+    row = await database.fetchrow(
+        "SELECT last_polled_at, backfill_done, last_error FROM google_accounts WHERE id = $1", account["id"])
+    # Nothing moved, and it says why.
+    assert row["last_polled_at"] is None and row["backfill_done"] is False
+    assert "could not be stored" in row["last_error"]
+
+    # So the next pass sees it again, and this time it works.
+    second = await mailbox.poll(account["id"], transport=fake)
+    assert second["stored"] == 1 and second["failed"] == 0 and second["stalled"] is False
+    assert await database.fetchval("SELECT count(*) FROM input_artifacts WHERE channel = 'gmail'") == 2
+    row = await database.fetchrow(
+        "SELECT last_polled_at, last_error FROM google_accounts WHERE id = $1", account["id"])
+    assert row["last_polled_at"] is not None and row["last_error"] is None
+
+
+async def test_a_message_that_can_never_be_stored_is_stepped_past(family, database, monkeypatch):
+    """Too large, or nothing readable in it. The next poll would refuse it
+    identically, so refusing is not a reason to stop."""
+    fake = FakeGoogle(messages={"m1": _raw()})
+    account = await _connect(family, fake)
+
+    async def refuse(*a, **kw):
+        raise mailbox.gateway.Rejected("too_large", status=413)
+
+    monkeypatch.setattr(mailbox.gateway, "receive_gmail", refuse)
+    result = await mailbox.poll(account["id"], transport=fake)
+    assert result["refused"] == 1 and result["failed"] == 0 and result["stalled"] is False
+    assert await database.fetchval("SELECT last_polled_at FROM google_accounts WHERE id = $1",
+                                    account["id"]) is not None
+
+
+async def test_two_members_can_connect_the_same_mailbox(family, database):
+    """A shared family Gmail. Keying only on Gmail's id gave the first poller
+    a private copy and the second nothing to see."""
+    shared = FakeGoogle(messages={"m1": _raw()}, email="family@gmail.com", sub="shared-sub")
+    amma = await _connect(family, shared, who="amma")
+    appa = await _connect(family, FakeGoogle(messages={"m1": _raw()}, email="family@gmail.com",
+                                             sub="shared-sub"), who="appa")
+    assert amma["id"] != appa["id"]
+
+    await mailbox.poll(amma["id"], transport=shared)
+    await mailbox.poll(appa["id"], transport=shared)
+
+    owners = {r["submitted_by"] for r in await database.fetch(
+        "SELECT submitted_by FROM input_artifacts WHERE channel = 'gmail'")}
+    assert owners == {uuid.UUID(family.amma["id"]), uuid.UUID(family.appa["id"])}
+    # And each of them can see their own.
+    for who in ("amma", "appa"):
+        seen = (await family.client.get("/v1/artifacts", headers=family.h(who))).json()
+        assert [a for a in seen if a["channel"] == "gmail"]
+
+
+async def test_a_mailbox_that_has_gone_quiet_says_so_however_it_went_quiet(family, database):
+    """needs_reconnect is one cause of not being read. A wedged message is
+    another, and a poller that is not running is a third. The symptom a family
+    cares about is the same."""
+    fake = FakeGoogle(messages={"m1": _raw()})
+    account = await _connect(family, fake)
+    live = (await mailbox.list_for(_principal(family)))[0]
+    assert mailbox.is_quiet(live) is False
+
+    await database.execute("UPDATE google_accounts SET connected_at = NOW() - INTERVAL '3 days' WHERE id = $1",
+                           account["id"])
+    stale = (await mailbox.list_for(_principal(family)))[0]
+    assert mailbox.is_quiet(stale) is True

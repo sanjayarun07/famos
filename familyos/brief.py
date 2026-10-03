@@ -149,13 +149,21 @@ async def _amendments(p: Principal) -> list[dict]:
 
 
 async def _mailboxes(p: Principal) -> list[dict]:
-    """The member's own connected mailboxes that have stopped working. Only
-    they can reconnect one, and only they can see it."""
+    """The member's own connected mailboxes that have gone quiet. Only they can
+    reconnect one, and only they can see it.
+
+    Quiet, not broken: a dead token is one cause, a message the poller cannot
+    get past is another, and a poller that is not running at all is a third.
+    The cause belongs in the console; what belongs here is the symptom, which
+    is the same in every case -- mail is arriving in that mailbox and nowhere
+    else."""
     return [_item(
         "mailbox", account["email"],
-        "FamilyOS can no longer read this mailbox, so notices in it are not arriving",
+        ("FamilyOS can no longer read this mailbox, so notices in it are not arriving"
+         if account["needs_reconnect"] else
+         "this mailbox has not been read for a day, so notices in it may not be arriving"),
         mailbox_id=account["id"])
-        for account in await mailbox.list_for(p) if account["needs_reconnect"]]
+        for account in await mailbox.list_for(p) if mailbox.is_quiet(account)]
 
 
 async def _quarantine(p: Principal) -> list[dict]:

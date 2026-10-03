@@ -259,3 +259,23 @@ async def test_an_empty_household_still_exports(family, database):
     assert counts["notices"] == 0
     assert "The Arun family" in zf.read("family.md").decode()
     assert "Nothing has been sent yet" in zf.read("reminders.md").decode()
+
+
+async def test_a_childs_export_reaches_as_far_as_their_erasure_would(family, database):
+    """Erasure clears a claim naming "Older" when the child is "Older one",
+    because consent.names_match accepts a shortened name. Export used string
+    equality, so it handed over less than would be destroyed -- the wrong
+    direction to be wrong in."""
+    from familyos import consent
+    assert consent.names_match("Older", "Older one")
+
+    await family.consent(family.older)
+    artifact_id = (await family.upload("amma", pdf("short"), visibility="shared")).json()["artifact"]["id"]
+    await _claim(database, family, artifact_id, title="The shortened name", subject_name="Older")
+    other = (await family.upload("amma", pdf("else"), visibility="shared")).json()["artifact"]["id"]
+    await _claim(database, family, other, title="Somebody else entirely", subject_name="Appa")
+
+    data, _, counts = await export.for_subject(_principal(family), uuid.UUID(family.older["id"]))
+    titles = [c["title"] for c in json.loads(_open(data).read("data/claims.json"))]
+    assert titles == ["The shortened name"]
+    assert counts["notices"] == 1

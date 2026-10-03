@@ -172,8 +172,14 @@ async def receive_gmail(household_id: uuid.UUID, member_id: uuid.UUID, raw: byte
             data=raw, media_type="message/rfc822", channel="gmail", visibility="private", status="accepted",
             submitted_by=member_id, source=source,
             # Gmail's own id, so re-reading an overlapping window stores
-            # nothing new and a restarted poller is safe.
-            dedup_key=f"gmail:{gmail_id}"), actor_kind="inbound")
+            # nothing new and a restarted poller is safe -- scoped to the
+            # member, because two of them can connect the same account. A
+            # shared family mailbox would otherwise store one private copy
+            # belonging to whoever polled first, and the other would never see
+            # it. Each gets their own; identical bytes arriving twice is
+            # already handled downstream, where the later copy's tasks are
+            # superseded by the first.
+            dedup_key=f"gmail:{member_id}:{gmail_id}"), actor_kind="inbound")
         if duplicate:
             return parent, True
         stored = [parent["id"]]

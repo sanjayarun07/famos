@@ -182,3 +182,22 @@ async def test_resolving_is_not_a_way_to_learn_a_private_notice_exists(family):
         await gaps.resolve(_principal(family, "appa"), uuid.UUID(gap["id"]), uuid.UUID(private_id))
     with pytest.raises(NotFound):
         await gaps.resolve(_principal(family, "appa"), uuid.uuid4(), None)
+
+
+async def test_closing_a_gap_follows_the_same_rule_as_reading_one(family):
+    """Being in the household was enough to close somebody else's report, and
+    the row came back with the title and note they had typed. Paati is an
+    adult, not a guardian, so the household's reports are not hers to touch."""
+    theirs = await _report(family, who="amma", title="Amma's private note", note="something personal")
+
+    with pytest.raises(NotFound):
+        await gaps.resolve(_principal(family, "paati"), uuid.UUID(theirs["id"]), None)
+    r = await family.client.post(f"/v1/intake-gaps/{theirs['id']}/arrived", headers=family.h("paati"),
+                                 json={"arrived_as": None})
+    assert r.status_code == 404
+    assert "private note" not in r.text and "personal" not in r.text
+
+    # Her own she may close, and a guardian may close any of the household's.
+    mine = await _report(family, who="paati", title="Paati noticed this")
+    assert await gaps.resolve(_principal(family, "paati"), uuid.UUID(mine["id"]), None)
+    assert await gaps.resolve(_principal(family, "amma"), uuid.UUID(theirs["id"]), None)

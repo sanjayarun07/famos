@@ -95,11 +95,16 @@ async def list_for(p: Principal, limit: int = 200) -> list[dict]:
 
 async def resolve(p: Principal, gap_id: uuid.UUID, artifact_id: uuid.UUID | None) -> dict:
     """Point a gap at the notice that eventually arrived, so "we fixed that
-    one" is answerable. Passing nothing unsets it."""
+    one" is answerable. Passing nothing unsets it.
+
+    The same rule as reading one: a guardian may close any of the household's,
+    anyone else only their own. Being in the household is not enough -- a gap
+    carries a title and a note the reporter typed, so answering with the row
+    would hand those over to whoever had the id."""
     async with pool().acquire() as conn, conn.transaction():
         gap = await conn.fetchrow(
-            "SELECT * FROM intake_gaps WHERE id = $1 AND household_id = $2 FOR UPDATE",
-            gap_id, p.household_id)
+            "SELECT * FROM intake_gaps WHERE id = $1 AND household_id = $2 AND ($3 OR reported_by = $4) "
+            "FOR UPDATE", gap_id, p.household_id, p.is_guardian, p.member_id)
         if gap is None:
             raise NotFound("gap report")
         if artifact_id is not None:
