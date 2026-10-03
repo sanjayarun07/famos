@@ -325,7 +325,12 @@ async def run(evalset: Path, extractor_name: str, cache: Path | None, ids: set[s
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--evalset", type=Path, default=Path("evalset"))
-    ap.add_argument("--extractor", default="auto", choices=["auto", "model", "claude", "openai", "rules"])
+    # The names the pipeline actually knows. "auto" used to be one of them and
+    # was removed on purpose: an extractor that silently falls back to another
+    # makes a score that cannot be attributed to anything. Default is whatever
+    # FAMILYOS_EXTRACTOR says, so a score comes from the configuration the
+    # product is running.
+    ap.add_argument("--extractor", default=None, choices=list(pipeline.EXTRACTORS))
     ap.add_argument("--cache", type=Path, default=None, help="directory for cached model answers")
     ap.add_argument("--ids", default=None, help="comma-separated notice ids")
     ap.add_argument("--out", type=Path, default=None, help="write the full JSON report here")
