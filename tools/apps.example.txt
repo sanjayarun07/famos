@@ -1,0 +1,12 @@
+# The ten apps that matter. Replace every line: the point of this file is to
+# force the real list to be written down, and finding out how much of the long
+# tail is genuinely mobile-only is half the value of the exercise.
+#
+#   <package name>   <a label for the report>
+#
+# Find a package name from the Play Store URL: the id= parameter in
+# https://play.google.com/store/apps/details?id=com.example.schoolapp
+# Or, with the app on a device: adb shell pm list packages | grep -i school
+
+com.example.schoolapp          The school's own app
+com.example.communityapp       The apartment / community app
