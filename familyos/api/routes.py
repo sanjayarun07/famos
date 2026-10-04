@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Reque
 from fastapi.responses import RedirectResponse
 
 from familyos import (
+    actions,
     artifacts,
     audit,
     brief,
@@ -29,6 +30,9 @@ from familyos.identity import Principal
 from familyos.intake import gateway, mailbox, wa_bridge
 from familyos.intake import whatsapp as whatsapp_adapter
 from familyos.models import (
+    Action,
+    ActionApproveIn,
+    ActionIn,
     Amendment,
     AmendmentDecisionIn,
     Artifact,
@@ -352,6 +356,36 @@ async def disconnect_mailbox(account_id: uuid.UUID, p: Principal = Depends(curre
     """Stop reading it, overwrite the stored token and tell Google. Only the
     member whose mailbox it is may do this."""
     return Mailbox(**await mailbox.disconnect(p, account_id))
+
+
+# ----------------------------------------------------------------------------
+# doing something about a notice
+# ----------------------------------------------------------------------------
+
+@router.post("/obligations/{obligation_id}/actions", response_model=Action, status_code=201, tags=["actions"],
+             description="Work out what would be sent, and to whom, without sending it. There is no "
+                         "recipient parameter: a reply goes to the school that wrote, and a calendar "
+                         "entry to the member who asked.")
+async def propose_action(obligation_id: uuid.UUID, body: ActionIn, p: Principal = Depends(current_member)):
+    return Action(**await actions.propose(p, obligation_id, body.kind, body.body))
+
+
+@router.get("/actions", response_model=list[Action], tags=["actions"])
+async def list_actions(limit: int = 100, p: Principal = Depends(current_member)):
+    """Actions on notices this member can see."""
+    return [Action(**a) for a in await actions.list_for(p, limit)]
+
+
+@router.post("/actions/{action_id}/approve", response_model=Action, tags=["actions"],
+             description="Approve exactly what was shown, by echoing back its fingerprint. A mismatch "
+                         "means the stored action changed in between and the approval is refused.")
+async def approve_action(action_id: uuid.UUID, body: ActionApproveIn, p: Principal = Depends(current_member)):
+    return Action(**await actions.approve(p, action_id, body.params_sha256))
+
+
+@router.post("/actions/{action_id}/cancel", response_model=Action, tags=["actions"])
+async def cancel_action(action_id: uuid.UUID, p: Principal = Depends(current_member)):
+    return Action(**await actions.cancel(p, action_id))
 
 
 @router.get("/brief", response_model=Brief, tags=["extraction"])

@@ -22,11 +22,10 @@ row that exists is not made again, and a row already `sent` is not sent again.
 """
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
 import logging
 
-from familyos import artifacts, audit, jobs
+from familyos import artifacts, audit, jobs, mail
 from familyos.db import pool
 from familyos.identity import Principal
 from familyos.settings import settings
@@ -164,28 +163,9 @@ async def _send_log(row: dict, subject: str, body: str) -> None:
 
 
 async def _send_email(row: dict, subject: str, body: str) -> None:
-    if not settings.smtp_host:
-        raise RuntimeError("FAMILYOS_SMTP_HOST is not set, so the email channel cannot send")
     if not row.get("email"):
         raise RuntimeError("that member has no email address")
-
-    def deliver() -> None:
-        import smtplib
-        from email.message import EmailMessage
-
-        msg = EmailMessage()
-        msg["From"] = settings.smtp_from or settings.smtp_username
-        msg["To"] = row["email"]
-        msg["Subject"] = subject
-        msg.set_content(body)
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-            if settings.smtp_starttls:
-                server.starttls()
-            if settings.smtp_username:
-                server.login(settings.smtp_username, settings.smtp_password)
-            server.send_message(msg)
-
-    await asyncio.to_thread(deliver)
+    await mail.send(row["email"], subject, body)
 
 
 async def _send_whatsapp(row: dict, subject: str, body: str) -> None:

@@ -130,6 +130,14 @@ class Settings(BaseSettings):
     # it revises. Always proposed, never applied on its own.
     reconciliation_enabled: bool = True
 
+    # Doing something about a notice. Two kinds only -- reply to the school
+    # that wrote, and a calendar entry -- and the recipient is derived from the
+    # notice rather than supplied, so there is no parameter through which a
+    # message could be addressed anywhere else.
+    actions_enabled: bool = False
+    action_max_attempts: int = 3
+    action_sweep_seconds: int = 60
+
     # Connected Gmail. A member grants read-only access to their own mailbox
     # and the poller looks for school mail in it.
     #

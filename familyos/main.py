@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from familyos import db, erasure, jobs, reminders
+from familyos import actions, db, erasure, jobs, reminders
 from familyos.api.routes import router
 from familyos.artifacts import HouseholdUnavailable, TooLarge
 from familyos.consent import ConsentRequired
@@ -33,6 +33,7 @@ def register_job_handlers() -> None:
     extraction.register()
     reminders.register()
     mailbox.register()
+    actions.register()
 
 
 @contextlib.asynccontextmanager
@@ -44,11 +45,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # basicConfig is a no-op once the host has configured logging; without it
     # uvicorn leaves the root logger bare and this line goes nowhere.
     logging.basicConfig(level=logging.INFO)
-    for said in (extraction_pipeline.describe(), parse_sandbox.describe(), mailbox.describe()):
+    for said in (extraction_pipeline.describe(), parse_sandbox.describe(), mailbox.describe(),
+                 actions.describe()):
         logger.error("%s", said) if "MISCONFIGURED" in said else logger.info("%s", said)
     if settings.jobs_enabled:
         await reminders.ensure_scheduled()
         await mailbox.ensure_scheduled()
+        await actions.ensure_scheduled()
     worker = asyncio.create_task(jobs.worker()) if settings.jobs_enabled else None
     try:
         yield

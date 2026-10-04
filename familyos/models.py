@@ -338,6 +338,43 @@ class CaptureSummary(BaseModel):
     caveat: str
 
 
+ActionKind = Literal["reply", "calendar"]
+
+
+class ActionIn(BaseModel):
+    """What to do about an obligation. There is no recipient field: the address
+    is derived from the notice, which is what stops this being a way to send
+    mail anywhere."""
+    kind: ActionKind
+    # Required for a reply, ignored for a calendar entry.
+    body: str | None = Field(default=None, max_length=4000)
+
+
+class ActionApproveIn(BaseModel):
+    """The fingerprint of exactly what was shown. A mismatch means the stored
+    action is not what the person read, so the approval does not apply."""
+    params_sha256: str = Field(min_length=64, max_length=64)
+
+
+class Action(BaseModel):
+    id: uuid.UUID
+    obligation_id: uuid.UUID
+    artifact_id: uuid.UUID
+    kind: ActionKind
+    recipient: str
+    subject: str
+    body: str
+    params_sha256: str
+    status: Literal["proposed", "approved", "sending", "sent", "failed", "cancelled"]
+    proposed_by: uuid.UUID
+    approved_by: uuid.UUID | None = None
+    approved_at: datetime | None = None
+    sent_at: datetime | None = None
+    attempts: int
+    error: str | None = None
+    created_at: datetime
+
+
 BriefReason = Literal["missed", "mailbox", "overdue", "today", "undecided", "soon", "amendment",
                       "quarantine"]
 
