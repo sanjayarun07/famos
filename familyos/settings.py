@@ -24,6 +24,22 @@ class Settings(BaseSettings):
     s3_access_key_id: str | None = Field(default=None, repr=False)
     s3_secret_access_key: str | None = Field(default=None, repr=False)
 
+    # Parsing runs PyMuPDF, Pillow and Tesseract over bytes a stranger sent,
+    # so it runs in a child process with no FAMILYOS_ environment: no master
+    # key, no database URL, no object-store credentials. Off only for
+    # development, and the boot log says so loudly when it is.
+    parse_sandbox: bool = True
+    parse_timeout_seconds: float = 90.0
+    parse_memory_mb: int = 1024
+    parse_cpu_seconds: int = 120
+    parse_max_output_bytes: int = 64 * 1024 * 1024
+    # Where a stronger boundary goes without the caller knowing. For example:
+    #   FAMILYOS_SANDBOX_CMD="bwrap --unshare-net --unshare-pid --die-with-parent --ro-bind / /"
+    # A process stops a compromised parser reading our secrets or reaching the
+    # database. It does not stop outbound network or a kernel escape; this is
+    # the seam for whatever does.
+    sandbox_cmd: str | None = None
+
     # Intake limits.
     max_upload_bytes: int = 25 * 1024 * 1024
     max_email_bytes: int = 30 * 1024 * 1024

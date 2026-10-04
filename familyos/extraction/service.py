@@ -13,7 +13,6 @@ tables, which cascade with the artifact on erasure, and nowhere else.
 """
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
 import email.utils
 import uuid
@@ -22,11 +21,10 @@ import asyncpg
 
 from familyos import artifacts, audit, consent, jobs, reconcile
 from familyos.db import pool
-from familyos.extraction import pipeline
+from familyos.extraction import pipeline, sandbox
 from familyos.extraction.claims import Extraction
 from familyos.extraction.llm import ModelExtractor
 from familyos.extraction.obligations import propose
-from familyos.extraction.parse import parse
 from familyos.identity import Invalid, NotFound, Principal
 from familyos.settings import settings
 
@@ -82,7 +80,7 @@ async def _handle(job: dict, ctx: jobs.JobContext) -> dict:
 
     await ctx.step("0")
     data = await artifacts.read_bytes(household_id, artifact)
-    doc = await asyncio.to_thread(parse, data, artifact["media_type"])
+    doc = await sandbox.parse_isolated(data, artifact["media_type"])
     ref = reference_date(artifact)
     extractor = pipeline.make_extractor()
     if isinstance(extractor, ModelExtractor) and doc.char_count:
